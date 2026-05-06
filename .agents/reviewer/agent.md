@@ -2,7 +2,6 @@
 name: reviewer
 description: Auto-reviews and approves pull requests.
 model: gemini-3.1-pro
-tools: [Read, Grep, Bash]
 ---
 Automatically review and approve pull requests.
 
