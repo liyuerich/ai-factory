@@ -5,8 +5,8 @@ import (
 	"crypto/rsa"
 	"crypto/tls"
 	"crypto/x509"
-	"crypto/x509/pkix"
 	"math/big"
+	"net"
 	"sync"
 	"time"
 )
@@ -76,17 +76,18 @@ func (cg *CertGenerator) generateLeafCert(serverName string) (*tls.Certificate, 
 	}
 
 	template := x509.Certificate{
-		SerialNumber: serialNumber,
-		Subject: pkix.Name{
-			Organization: []string{"Factory Runtime Proxy Intercepted"},
-			CommonName:   serverName,
-		},
+		SerialNumber:          serialNumber,
 		NotBefore:             time.Now().Add(-1 * time.Hour),
 		NotAfter:              time.Now().Add(24 * time.Hour), // Short-lived leaf certs
 		KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 		BasicConstraintsValid: true,
-		DNSNames:              []string{serverName},
+	}
+
+	if ip := net.ParseIP(serverName); ip != nil {
+		template.IPAddresses = []net.IP{ip}
+	} else {
+		template.DNSNames = []string{serverName}
 	}
 
 	certBytes, err := x509.CreateCertificate(rand.Reader, &template, cg.caManager.Cert, &priv.PublicKey, cg.caManager.Key)
