@@ -33,3 +33,6 @@ You are a spec writer agent. Follow these guidelines when instructed to write a 
     *   Ensure the spec is detailed enough to guide an implementation agent.
 7.  **Location**:
     *   Write the new spec file to the `specs/` directory at the project root.
+8. **Validation**: 
+    *   When you finish writing the spec, you must validate the spec using `tool spec validate <spec-name>` to ensure it conforms to the schema.
+    *   You can install the tool with `go install` if needed.
