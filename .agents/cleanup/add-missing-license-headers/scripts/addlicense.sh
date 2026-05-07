@@ -1,3 +1,4 @@
+#!/bin/bash
 # Copyright 2026 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -12,37 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-name: Go Test
 
-permissions:
-  contents: read
-
-on:
-  push:
-    branches:
-      - main
-  pull_request:
-    branches:
-      - main
-
-jobs:
-  test:
-    runs-on: ubuntu-latest
-    steps:
-    - name: Checkout
-      uses: actions/checkout@v4
-
-    - name: Set up Go
-      uses: actions/setup-go@v5
-      with:
-        go-version-file: 'go.mod'
-        cache: true
-
-    - name: Install dependencies
-      run: go mod download
-
-    - name: Check Licenses
-      run: bash .agents/cleanup/add-missing-license-headers/scripts/checklicense.sh
-
-    - name: Go Test
-      run: go test -v ./...
+set -e
+go install github.com/google/addlicense@latest
+addlicense -ignore '**/*.yaml' -ignore '**/*.yml' .
