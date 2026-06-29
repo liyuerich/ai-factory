@@ -1,5 +1,32 @@
 #!/bin/bash
-set -ex
+set -euo pipefail
+set -x
+
+IMAGE_PREFIX=${IMAGE_PREFIX:-}
+if [[ -z "${IMAGE_PREFIX}" && -n "${IMAGE_REGISTRY:-}" ]]; then
+    IMAGE_PREFIX="${IMAGE_REGISTRY}"
+fi
+
+if [[ -z "${IMAGE_PREFIX}" && -n "${GOOGLE_CLOUD_PROJECT:-}" ]]; then
+    IMAGE_PREFIX="gcr.io/${GOOGLE_CLOUD_PROJECT}"
+fi
+
+if [[ -z "${IMAGE_PREFIX}" && -n "${GCP_PROJECT:-}" ]]; then
+    IMAGE_PREFIX="gcr.io/${GCP_PROJECT}"
+fi
+
+if [[ -z "${IMAGE_PREFIX}" ]] && command -v gcloud >/dev/null 2>&1; then
+    PROJECT_ID=$(gcloud config get project 2>/dev/null || true)
+    if [[ -n "${PROJECT_ID}" && "${PROJECT_ID}" != "(unset)" ]]; then
+        IMAGE_PREFIX="gcr.io/${PROJECT_ID}"
+    fi
+fi
+
+if [[ -z "${IMAGE_PREFIX}" ]]; then
+    echo "Error: IMAGE_PREFIX is required to install service-portals."
+    echo "Example: IMAGE_PREFIX=registry.example.com/ai-factory components/service-portals/install"
+    exit 1
+fi
 
 # Clone service-portals to a temp directory
 TMP_DIR=$(mktemp -d)
@@ -7,10 +34,6 @@ echo "Cloning service-portals into ${TMP_DIR}"
 git clone https://github.com/gke-labs/service-portals.git "${TMP_DIR}"
 
 pushd "${TMP_DIR}"
-
-# Get project to construct image prefix
-PROJECT_ID=$(gcloud config get project)
-IMAGE_PREFIX="gcr.io/${PROJECT_ID}"
 
 echo "Deploying to Kubernetes using ap..."
 IMAGE_PREFIX="${IMAGE_PREFIX}" go run github.com/gke-labs/gke-labs-infra/ap@latest deploy //...

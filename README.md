@@ -4,12 +4,12 @@ This project is an experiment in whether a coding agent can self-assemble. In ot
 
 This project's end state is "self-hosting": building the coding agent that can perform these tasks autonomously.
 
-We will rely on a Kubernetes cluster (a GKE cluster) and run agents in sandboxes provided by [agent-sandbox](https://github.com/kubernetes-sigs/agent-sandbox). We will initially use `gemini-cli` as our coding agent. We will assume this infrastructure exists initially, but will work towards building the infrastructure to run this experiment purely agentically.
+We will rely on a Kubernetes cluster and run agents in sandboxes provided by [agent-sandbox](https://github.com/kubernetes-sigs/agent-sandbox). GKE is the first supported managed environment, but the install flow is intended to work with any Kubernetes cluster reachable through the current `kubectl` context. We will initially use `gemini-cli` as our coding agent. We will assume this infrastructure exists initially, but will work towards building the infrastructure to run this experiment purely agentically.
 
 ## Repository Structure
 
 - `.agents/`: Definitions and instructions for the various AI agents that operate within this repository (e.g., `builder`, `planner`, `reviewer`, `speccer`). Each agent has its own `agent.md` defining its persona, tools, and goals.
-- `components/`: Software components intended for installation on Kubernetes (GKE). Each component has its own installation logic (e.g., `components/<name>/install`), which is invoked by the master `components/install` script. This includes infrastructure like `agent-sandbox` which provides the Kubernetes-native sandboxes where our AI agents execute.
+- `components/`: Software components intended for installation on Kubernetes. Each component has its own installation logic (e.g., `components/<name>/install`), which is invoked by the master `components/install` script. This includes infrastructure like `agent-sandbox` which provides the Kubernetes-native sandboxes where our AI agents execute.
 - `tool/`: Go-based CLI tooling used within the repository, including tools for validating plans and specifications.
 - `specs/` & `plans/`: Documents generated during the Spec-Driven Development process for complex features.
 - `AGENTS.md`: Crucial instructions and architectural details for AI agents operating in this repository. Agents must read and update this file to share knowledge.
@@ -17,7 +17,57 @@ We will rely on a Kubernetes cluster (a GKE cluster) and run agents in sandboxes
 
 ## Architecture & Development Process
 
-The AI Factory is designed as a set of Kubernetes-native workloads and operators running on Google Kubernetes Engine (GKE).
+The AI Factory is designed as a set of Kubernetes-native workloads and operators. The default installer targets the active `kubectl` context; GKE-specific credential setup remains available by setting `KUBECONFIG_MODE=gke`.
+
+For a generic Kubernetes cluster, select the target context first and provide a writable image registry prefix:
+
+```bash
+kubectl config use-context <cluster-context>
+IMAGE_PREFIX=registry.example.com/ai-factory/ components/install
+```
+
+For a local or remote kind cluster, point `kubectl` at the cluster first, provide a tag that is already present in the kind nodes or can be loaded by `agent-sandbox`, and optionally reuse a local checkout of `agent-sandbox`:
+
+```bash
+export KUBECONFIG=/path/to/kubeconfig
+kubectl cluster-info
+
+IMAGE_PREFIX=localhost/ai-factory/ \
+IMAGE_TAG=dev \
+KIND_CLUSTER_NAME=fire-kind-cluster \
+AGENT_SANDBOX_SRC=/path/to/agent-sandbox \
+components/agent-sandbox/install
+```
+
+If the controller image was built and loaded into kind manually, skip the build step and only apply the manifests:
+
+```bash
+IMAGE_PREFIX=localhost/ai-factory/ \
+IMAGE_TAG=dev \
+AGENT_SANDBOX_SRC=/path/to/agent-sandbox \
+AGENT_SANDBOX_BUILD_IMAGES=false \
+components/agent-sandbox/install
+```
+
+After installation, run a small end-to-end sandbox check. By default this creates a warm pool and claim, copies this repository into the sandbox, and validates the `factory-runtime-proxy` spec from inside the sandbox:
+
+```bash
+DEV_IMAGE=golang:latest components/agent-sandbox/smoke-test
+```
+
+Use a mirror image if the cluster cannot pull directly from Docker Hub:
+
+```bash
+DEV_IMAGE=docker.m.daocloud.io/library/golang:1.26.4 components/agent-sandbox/smoke-test
+```
+
+For GKE, the installer can fetch credentials and derive a GCR image prefix from `gcloud`:
+
+```bash
+KUBECONFIG_MODE=gke CLUSTER_NAME=ai-factory ZONE=us-central1-a components/install
+```
+
+Optional GKE-oriented components such as `service-portals` are disabled by default and can be enabled with `INSTALL_SERVICE_PORTALS=true`.
 
 We follow a **Spec-Driven Development** process for complex features, handled entirely by interacting agents:
 1. **Spec Generation:** The `speccer` agent generates specifications.

@@ -1,25 +1,79 @@
 #!/bin/bash
-set -ex
+set -euo pipefail
+set -x
 
-# Clone agent-sandbox to a temp directory
-TMP_DIR=$(mktemp -d)
-echo "Cloning agent-sandbox into ${TMP_DIR}"
-git clone https://github.com/kubernetes-sigs/agent-sandbox.git "${TMP_DIR}"
+IMAGE_TAG=${IMAGE_TAG:-dev}
+IMAGE_PREFIX=${IMAGE_PREFIX:-}
+if [[ -z "${IMAGE_PREFIX}" && -n "${IMAGE_REGISTRY:-}" ]]; then
+    IMAGE_PREFIX="${IMAGE_REGISTRY}"
+fi
 
-pushd "${TMP_DIR}"
+if [[ -z "${IMAGE_PREFIX}" && -n "${GOOGLE_CLOUD_PROJECT:-}" ]]; then
+    IMAGE_PREFIX="gcr.io/${GOOGLE_CLOUD_PROJECT}/"
+fi
 
-# Get project to construct image prefix
-PROJECT_ID=$(gcloud config get project)
-IMAGE_PREFIX="gcr.io/${PROJECT_ID}/"
+if [[ -z "${IMAGE_PREFIX}" && -n "${GCP_PROJECT:-}" ]]; then
+    IMAGE_PREFIX="gcr.io/${GCP_PROJECT}/"
+fi
 
-echo "Building and pushing images with prefix ${IMAGE_PREFIX}"
-./dev/tools/push-images --image-prefix="${IMAGE_PREFIX}" --controller-only
+if [[ -z "${IMAGE_PREFIX}" ]] && command -v gcloud >/dev/null 2>&1; then
+    PROJECT_ID=$(gcloud config get project 2>/dev/null || true)
+    if [[ -n "${PROJECT_ID}" && "${PROJECT_ID}" != "(unset)" ]]; then
+        IMAGE_PREFIX="gcr.io/${PROJECT_ID}/"
+    fi
+fi
+
+if [[ -z "${IMAGE_PREFIX}" ]]; then
+    echo "Error: IMAGE_PREFIX is required for generic Kubernetes installs."
+    echo "Example: IMAGE_PREFIX=registry.example.com/ai-factory/ components/agent-sandbox/install"
+    exit 1
+fi
+
+if [[ "${IMAGE_PREFIX}" != */ ]]; then
+    IMAGE_PREFIX="${IMAGE_PREFIX}/"
+fi
+
+if [[ -n "${AGENT_SANDBOX_SRC:-}" ]]; then
+    TMP_DIR=""
+    WORK_DIR="${AGENT_SANDBOX_SRC}"
+else
+    TMP_DIR=$(mktemp -d)
+    WORK_DIR="${TMP_DIR}"
+    echo "Cloning agent-sandbox into ${WORK_DIR}"
+    git clone https://github.com/kubernetes-sigs/agent-sandbox.git "${WORK_DIR}"
+fi
+
+if [[ ! -x "${WORK_DIR}/dev/tools/deploy-to-kube" || ! -x "${WORK_DIR}/dev/tools/push-images" ]]; then
+    echo "Error: ${WORK_DIR} does not look like an agent-sandbox checkout."
+    echo "Set AGENT_SANDBOX_SRC to a valid https://github.com/kubernetes-sigs/agent-sandbox checkout."
+    exit 1
+fi
+
+pushd "${WORK_DIR}"
+
+echo "Building agent-sandbox controller image with prefix ${IMAGE_PREFIX} and tag ${IMAGE_TAG}"
+AGENT_SANDBOX_BUILD_IMAGES=${AGENT_SANDBOX_BUILD_IMAGES:-true}
+if [[ "${AGENT_SANDBOX_BUILD_IMAGES}" == "true" ]]; then
+    PUSH_ARGS=(
+        --image-prefix="${IMAGE_PREFIX}"
+        --image-tag="${IMAGE_TAG}"
+        --controller-only
+    )
+    if [[ -n "${KIND_CLUSTER_NAME:-}" ]]; then
+        PUSH_ARGS+=(--kind-cluster-name="${KIND_CLUSTER_NAME}")
+    fi
+    ./dev/tools/push-images "${PUSH_ARGS[@]}"
+else
+    echo "Skipping image build because AGENT_SANDBOX_BUILD_IMAGES=${AGENT_SANDBOX_BUILD_IMAGES}"
+fi
 
 echo "Deploying manifests to kubernetes with prefix ${IMAGE_PREFIX}"
 # Install the "extension" version of the manifest
-./dev/tools/deploy-to-kube --image-prefix="${IMAGE_PREFIX}" --extensions
+./dev/tools/deploy-to-kube --image-prefix="${IMAGE_PREFIX}" --image-tag="${IMAGE_TAG}" --extensions
 
 popd
-rm -rf "${TMP_DIR}"
+if [[ -n "${TMP_DIR:-}" ]]; then
+    rm -rf "${TMP_DIR}"
+fi
 
 echo "agent-sandbox installation complete."

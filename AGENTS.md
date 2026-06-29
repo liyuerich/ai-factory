@@ -12,9 +12,10 @@ This file contains notes and instructions for AI coding agents (like yourself) w
 
 ## Current Architecture
 
-* **Target Environment:** Google Kubernetes Engine (GKE).
-* **Component Management:** The `components/` directory contains all sub-components. The master install script is `components/install`.
-* **Agent Sandbox:** We are using `agent-sandbox` (from `https://github.com/kubernetes-sigs/agent-sandbox`) installed via the `components/agent-sandbox/install` script. It installs the "extension" manifests (SandboxWarmPool, SandboxClaim, SandboxTemplate). Images are pushed to GCR using `gcr.io/$(gcloud config get project)/`.
+* **Target Environment:** Kubernetes. GKE is the first supported managed environment, but install scripts should work against any cluster reachable through the active `kubectl` context.
+* **Component Management:** The `components/` directory contains all sub-components. The master install script is `components/install`. By default it uses the current `kubectl` context; set `KUBECONFIG_MODE=gke` to fetch GKE credentials first.
+* **Image Registry:** Generic Kubernetes installs must provide `IMAGE_PREFIX` (or `IMAGE_REGISTRY`) so component images can be pushed and referenced without assuming GCR. GKE installs can still derive `gcr.io/<project>/` from `gcloud`.
+* **Agent Sandbox:** We are using `agent-sandbox` (from `https://github.com/kubernetes-sigs/agent-sandbox`) installed via the `components/agent-sandbox/install` script. It installs the "extension" manifests (SandboxWarmPool, SandboxClaim, SandboxTemplate).
 
 6. **Agent Definitions:** Agents are defined in the `.agents/` directory. Each agent has a subdirectory with an `agent.md` file that specifies its instructions and metadata. The file format is Markdown with YAML frontmatter. The frontmatter MUST contain `name` and `description` fields, and should also specify `model` and `tools`. The `name` MUST match the directory name. The body of the file is the system prompt/instructions for the agent. The top-level agent is responsible for scanning and orchestrating these agents.
 7. **Event Triggers:** Agents can be triggered by GitHub events. Note that `@codebot-robot` is the current robot to add to trigger things. For example, assigning an issue to the robot triggers it to solve the issue. Requesting a PR review from the robot triggers the `reviewer` agent to auto-review and approve the PR.
