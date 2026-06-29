@@ -1,0 +1,96 @@
+#!/bin/bash
+set -euo pipefail
+
+NAMESPACE=${NAMESPACE:-default}
+NAME=${NAME:-ai-factory-smoke}
+DEV_IMAGE=${DEV_IMAGE:-golang:latest}
+AI_FACTORY_SRC=${AI_FACTORY_SRC:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}
+RUN_DEV_TASK=${RUN_DEV_TASK:-true}
+
+cleanup() {
+    kubectl delete sandboxclaim "${NAME}-claim" -n "${NAMESPACE}" --ignore-not-found >/dev/null 2>&1 || true
+    kubectl delete sandboxwarmpool "${NAME}-warmpool" -n "${NAMESPACE}" --ignore-not-found >/dev/null 2>&1 || true
+    kubectl delete sandboxtemplate "${NAME}-template" -n "${NAMESPACE}" --ignore-not-found >/dev/null 2>&1 || true
+}
+trap cleanup EXIT
+
+kubectl get crd sandboxes.agents.x-k8s.io >/dev/null
+kubectl get crd sandboxclaims.extensions.agents.x-k8s.io >/dev/null
+kubectl get crd sandboxtemplates.extensions.agents.x-k8s.io >/dev/null
+kubectl get crd sandboxwarmpools.extensions.agents.x-k8s.io >/dev/null
+
+cleanup
+
+cat <<EOF | kubectl apply -n "${NAMESPACE}" -f -
+apiVersion: extensions.agents.x-k8s.io/v1alpha1
+kind: SandboxTemplate
+metadata:
+  name: ${NAME}-template
+spec:
+  template:
+    spec:
+      containers:
+      - name: dev
+        image: ${DEV_IMAGE}
+        command:
+        - /bin/sh
+        - -lc
+        - mkdir -p /workspace && sleep 3600
+---
+apiVersion: extensions.agents.x-k8s.io/v1alpha1
+kind: SandboxWarmPool
+metadata:
+  name: ${NAME}-warmpool
+spec:
+  replicas: 1
+  templateRef:
+    name: ${NAME}-template
+---
+apiVersion: extensions.agents.x-k8s.io/v1alpha1
+kind: SandboxClaim
+metadata:
+  name: ${NAME}-claim
+spec:
+  templateRef:
+    name: ${NAME}-template
+EOF
+
+kubectl wait sandboxclaim "${NAME}-claim" -n "${NAMESPACE}" --for=condition=Ready --timeout=180s
+
+POD=$(kubectl get sandboxclaim "${NAME}-claim" -n "${NAMESPACE}" -o jsonpath='{.status.sandboxName}')
+if [[ -z "${POD}" ]]; then
+    echo "SandboxClaim did not report a sandboxName."
+    exit 1
+fi
+
+kubectl wait pod "${POD}" -n "${NAMESPACE}" --for=condition=Ready --timeout=180s
+
+if [[ "${RUN_DEV_TASK}" == "true" ]]; then
+    ARCHIVE="/tmp/${NAME}-src.tgz"
+    tar \
+        --exclude "$(basename "${AI_FACTORY_SRC}")/.git" \
+        --exclude "$(basename "${AI_FACTORY_SRC}")/kubeconfig" \
+        -czf "${ARCHIVE}" \
+        -C "$(dirname "${AI_FACTORY_SRC}")" \
+        "$(basename "${AI_FACTORY_SRC}")"
+    kubectl cp "${ARCHIVE}" "${NAMESPACE}/${POD}:/workspace/ai-factory.tgz" -c dev
+    kubectl exec -n "${NAMESPACE}" "${POD}" -c dev -- /bin/sh -lc '
+        set -e
+        cd /workspace
+        tar -xzf ai-factory.tgz
+        cd ai-factory
+        GO_BIN="$(command -v go || true)"
+        if [ -z "${GO_BIN}" ] && [ -x /usr/local/go/bin/go ]; then
+            GO_BIN=/usr/local/go/bin/go
+        fi
+        if [ -z "${GO_BIN}" ]; then
+            echo "go binary not found in sandbox image"
+            exit 1
+        fi
+        GOPROXY="${GOPROXY:-https://goproxy.cn,direct}" "${GO_BIN}" run ./tool/cmd/tool spec validate factory-runtime-proxy
+    '
+else
+    kubectl exec -n "${NAMESPACE}" "${POD}" -c dev -- /bin/sh -lc 'echo sandbox-ready'
+fi
+
+echo "agent-sandbox smoke test passed."

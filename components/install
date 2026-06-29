@@ -1,28 +1,53 @@
 #!/bin/bash
-set -ex
+set -euo pipefail
+set -x
 
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
-# Ensure we have a GKE cluster running
-CLUSTER_NAME=${CLUSTER_NAME:-ai-factory}
-ZONE=${ZONE:-us-central1-a}
+# By default, install into the currently selected Kubernetes context.
+# Set KUBECONFIG_MODE=gke to fetch GKE credentials before installing.
+KUBECONFIG_MODE=${KUBECONFIG_MODE:-current-context}
 
-if ! gcloud container clusters describe "$CLUSTER_NAME" --zone "$ZONE" >/dev/null 2>&1; then
-    echo "Error: GKE cluster $CLUSTER_NAME does not exist in zone $ZONE."
+if [[ "${KUBECONFIG_MODE}" == "gke" ]]; then
+    CLUSTER_NAME=${CLUSTER_NAME:-ai-factory}
+    ZONE=${ZONE:-us-central1-a}
+
+    if ! command -v gcloud >/dev/null 2>&1; then
+        echo "Error: KUBECONFIG_MODE=gke requires gcloud on PATH."
+        exit 1
+    fi
+
+    if ! gcloud container clusters describe "$CLUSTER_NAME" --zone "$ZONE" >/dev/null 2>&1; then
+        echo "Error: GKE cluster $CLUSTER_NAME does not exist in zone $ZONE."
+        exit 1
+    fi
+
+    gcloud container clusters get-credentials "$CLUSTER_NAME" --zone "$ZONE"
+    gcloud auth configure-docker --quiet
+elif [[ "${KUBECONFIG_MODE}" != "current-context" ]]; then
+    echo "Error: unsupported KUBECONFIG_MODE=${KUBECONFIG_MODE}; use current-context or gke."
     exit 1
 fi
 
-# Get credentials for the cluster
-gcloud container clusters get-credentials "$CLUSTER_NAME" --zone "$ZONE"
-
-# Configure docker to use gcloud credentials
-gcloud auth configure-docker --quiet
+kubectl cluster-info >/dev/null
 
 # Install all components
 echo "Installing components..."
 
-"${DIR}/cert-manager/install"
-"${DIR}/service-portals/install"
-"${DIR}/agent-sandbox/install"
+INSTALL_CERT_MANAGER=${INSTALL_CERT_MANAGER:-true}
+INSTALL_SERVICE_PORTALS=${INSTALL_SERVICE_PORTALS:-false}
+INSTALL_AGENT_SANDBOX=${INSTALL_AGENT_SANDBOX:-true}
+
+if [[ "${INSTALL_CERT_MANAGER}" == "true" ]]; then
+    "${DIR}/cert-manager/install"
+fi
+
+if [[ "${INSTALL_SERVICE_PORTALS}" == "true" ]]; then
+    "${DIR}/service-portals/install"
+fi
+
+if [[ "${INSTALL_AGENT_SANDBOX}" == "true" ]]; then
+    "${DIR}/agent-sandbox/install"
+fi
 
 echo "All components installed successfully."
