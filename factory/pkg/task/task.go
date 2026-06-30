@@ -108,11 +108,24 @@ type ReportingSpec struct {
 
 // FactoryTaskStatus captures the controller-visible progress of a task.
 type FactoryTaskStatus struct {
-	Phase          string `yaml:"phase,omitempty"`
-	SandboxName    string `yaml:"sandboxName,omitempty"`
-	LastResultURL  string `yaml:"lastResultURL,omitempty"`
-	LastMessage    string `yaml:"lastMessage,omitempty"`
-	ObservedCommit string `yaml:"observedCommit,omitempty"`
+	Phase            string      `yaml:"phase,omitempty" json:"phase,omitempty"`
+	Conditions       []Condition `yaml:"conditions,omitempty" json:"conditions,omitempty"`
+	SandboxClaimName string      `yaml:"sandboxClaimName,omitempty" json:"sandboxClaimName,omitempty"`
+	SandboxName      string      `yaml:"sandboxName,omitempty" json:"sandboxName,omitempty"`
+	StartedAt        string      `yaml:"startedAt,omitempty" json:"startedAt,omitempty"`
+	CompletedAt      string      `yaml:"completedAt,omitempty" json:"completedAt,omitempty"`
+	LastResultURL    string      `yaml:"lastResultURL,omitempty" json:"lastResultURL,omitempty"`
+	LastMessage      string      `yaml:"lastMessage,omitempty" json:"lastMessage,omitempty"`
+	ObservedCommit   string      `yaml:"observedCommit,omitempty" json:"observedCommit,omitempty"`
+}
+
+// Condition describes one status transition for a FactoryTask.
+type Condition struct {
+	Type               string `yaml:"type" json:"type"`
+	Status             string `yaml:"status" json:"status"`
+	Reason             string `yaml:"reason,omitempty" json:"reason,omitempty"`
+	Message            string `yaml:"message,omitempty" json:"message,omitempty"`
+	LastTransitionTime string `yaml:"lastTransitionTime,omitempty" json:"lastTransitionTime,omitempty"`
 }
 
 // Parse decodes a FactoryTask from YAML.
