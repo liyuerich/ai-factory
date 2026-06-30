@@ -97,6 +97,8 @@ spec:
                     minLength: 1
                   claimName:
                     type: string
+                  containerName:
+                    type: string
               work:
                 type: object
                 properties:
@@ -129,4 +131,3 @@ spec:
                 type: string
     subresources:
       status: {}
-

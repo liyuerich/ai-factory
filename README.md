@@ -92,6 +92,20 @@ go run ./factory/cmd/factory task validate examples/factory-task-github.yaml
 go run ./factory/cmd/factory task plan examples/factory-task-gitlab.yaml
 ```
 
+Render the first controller output, a `SandboxClaim`, without touching a cluster:
+
+```bash
+go run ./factory/cmd/factory task controller manifest examples/factory-task-github.yaml
+```
+
+Run one task against the active `kubectl` context:
+
+```bash
+go run ./factory/cmd/factory task controller run-once examples/factory-task-github.yaml
+```
+
+The `run-once` command is the first controller slice: it creates the `SandboxClaim`, waits for agent-sandbox to bind a sandbox, and executes the generated plan inside the sandbox container. A long-running watch controller and GitHub/GitLab issue webhooks are still future layers.
+
 We follow a **Spec-Driven Development** process for complex features, handled entirely by interacting agents:
 1. **Spec Generation:** The `speccer` agent generates specifications.
 2. **Planning:** The `planner` agent creates detailed implementation plans.

@@ -190,3 +190,53 @@ spec:
 		t.Fatalf("len(Steps) = %d, want %d", got, want)
 	}
 }
+
+func TestReconcileBuildsSandboxClaim(t *testing.T) {
+	task, err := Parse([]byte(`
+apiVersion: factory.ai.gke.io/v1alpha1
+kind: FactoryTask
+metadata:
+  name: Validate GitHub Project
+  namespace: factory-system
+spec:
+  source:
+    provider: github
+    repository: liyuerich/ai-factory
+    baseRef: main
+  agent:
+    name: builder
+  sandbox:
+    templateRef: go-dev
+  work:
+    commands:
+    - go test ./...
+`))
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+
+	output, err := Reconcile(task)
+	if err != nil {
+		t.Fatalf("Reconcile() error = %v", err)
+	}
+	if output.SandboxClaim.APIVersion != sandboxClaimAPIVersion {
+		t.Fatalf("APIVersion = %q", output.SandboxClaim.APIVersion)
+	}
+	if output.SandboxClaim.Metadata.Name != "validate-github-project-claim" {
+		t.Fatalf("claim name = %q", output.SandboxClaim.Metadata.Name)
+	}
+	if output.SandboxClaim.Metadata.Namespace != "factory-system" {
+		t.Fatalf("namespace = %q", output.SandboxClaim.Metadata.Namespace)
+	}
+	if got := output.SandboxClaim.Metadata.Labels[taskNameLabel]; got != "validate-github-project" {
+		t.Fatalf("task label = %q", got)
+	}
+
+	data, err := output.SandboxClaimYAML()
+	if err != nil {
+		t.Fatalf("SandboxClaimYAML() error = %v", err)
+	}
+	if !strings.Contains(string(data), "kind: SandboxClaim") {
+		t.Fatalf("SandboxClaimYAML() = %s", data)
+	}
+}
