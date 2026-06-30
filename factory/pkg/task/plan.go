@@ -14,7 +14,10 @@
 
 package task
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // ExecutionPlan is the normalized controller input produced from a FactoryTask.
 type ExecutionPlan struct {
@@ -26,6 +29,8 @@ type ExecutionPlan struct {
 	AgentName       string
 	SandboxTemplate string
 	SandboxClaim    string
+	ContainerName   string
+	WorkDir         string
 	Steps           []ExecutionStep
 }
 
@@ -51,6 +56,11 @@ func BuildExecutionPlan(task *FactoryTask) (*ExecutionPlan, error) {
 	if claimName == "" {
 		claimName = fmt.Sprintf("%s-claim", task.Metadata.Name)
 	}
+	containerName := task.Spec.Sandbox.ContainerName
+	if containerName == "" {
+		containerName = "dev"
+	}
+	workDir := "/workspace/repo"
 
 	plan := &ExecutionPlan{
 		TaskName:        task.Metadata.Name,
@@ -61,14 +71,16 @@ func BuildExecutionPlan(task *FactoryTask) (*ExecutionPlan, error) {
 		AgentName:       task.Spec.Agent.Name,
 		SandboxTemplate: task.Spec.Sandbox.TemplateRef,
 		SandboxClaim:    claimName,
+		ContainerName:   containerName,
+		WorkDir:         workDir,
 		Steps: []ExecutionStep{
 			{
 				Name:    "clone repository",
-				Command: []string{"git", "clone", cloneURL, "repo"},
+				Command: []string{"/bin/sh", "-lc", fmt.Sprintf("mkdir -p %s && git clone %s %s", shellQuote("/workspace"), shellQuote(cloneURL), shellQuote(workDir))},
 			},
 			{
 				Name:    "checkout base ref",
-				Command: []string{"git", "-C", "repo", "checkout", task.Spec.Source.BaseRef},
+				Command: []string{"git", "-C", workDir, "checkout", task.Spec.Source.BaseRef},
 			},
 		},
 	}
@@ -76,9 +88,13 @@ func BuildExecutionPlan(task *FactoryTask) (*ExecutionPlan, error) {
 	for i, command := range task.Spec.Work.Commands {
 		plan.Steps = append(plan.Steps, ExecutionStep{
 			Name:    fmt.Sprintf("run command %d", i+1),
-			Command: []string{"/bin/sh", "-lc", command},
+			Command: []string{"/bin/sh", "-lc", fmt.Sprintf("cd %s && %s", shellQuote(workDir), command)},
 		})
 	}
 
 	return plan, nil
+}
+
+func shellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
 }

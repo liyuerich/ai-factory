@@ -89,8 +89,9 @@ type AgentSpec struct {
 
 // SandboxSpec describes the sandbox that should execute the task.
 type SandboxSpec struct {
-	TemplateRef string `yaml:"templateRef"`
-	ClaimName   string `yaml:"claimName,omitempty"`
+	TemplateRef   string `yaml:"templateRef"`
+	ClaimName     string `yaml:"claimName,omitempty"`
+	ContainerName string `yaml:"containerName,omitempty"`
 }
 
 // WorkSpec describes the actual coding task.
