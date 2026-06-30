@@ -1,0 +1,132 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: factorytasks.factory.ai.gke.io
+spec:
+  group: factory.ai.gke.io
+  scope: Namespaced
+  names:
+    plural: factorytasks
+    singular: factorytask
+    kind: FactoryTask
+    shortNames:
+    - ft
+  versions:
+  - name: v1alpha1
+    served: true
+    storage: true
+    additionalPrinterColumns:
+    - name: Provider
+      type: string
+      jsonPath: .spec.source.provider
+    - name: Repository
+      type: string
+      jsonPath: .spec.source.repository
+    - name: Agent
+      type: string
+      jsonPath: .spec.agent.name
+    - name: Phase
+      type: string
+      jsonPath: .status.phase
+    schema:
+      openAPIV3Schema:
+        type: object
+        required:
+        - spec
+        properties:
+          spec:
+            type: object
+            required:
+            - source
+            - agent
+            - sandbox
+            - work
+            properties:
+              source:
+                type: object
+                required:
+                - provider
+                - repository
+                - baseRef
+                properties:
+                  provider:
+                    type: string
+                    enum:
+                    - github
+                    - gitlab
+                  host:
+                    type: string
+                  repository:
+                    type: string
+                    minLength: 1
+                  baseRef:
+                    type: string
+                    minLength: 1
+                  cloneURL:
+                    type: string
+                    format: uri
+              trigger:
+                type: object
+                properties:
+                  type:
+                    type: string
+                  id:
+                    type: string
+                  url:
+                    type: string
+                    format: uri
+                  actor:
+                    type: string
+              agent:
+                type: object
+                required:
+                - name
+                properties:
+                  name:
+                    type: string
+                    minLength: 1
+                  promptRef:
+                    type: string
+              sandbox:
+                type: object
+                required:
+                - templateRef
+                properties:
+                  templateRef:
+                    type: string
+                    minLength: 1
+                  claimName:
+                    type: string
+              work:
+                type: object
+                properties:
+                  instructions:
+                    type: string
+                  commands:
+                    type: array
+                    items:
+                      type: string
+              reporting:
+                type: object
+                properties:
+                  mode:
+                    type: string
+                  targetURL:
+                    type: string
+                    format: uri
+          status:
+            type: object
+            properties:
+              phase:
+                type: string
+              sandboxName:
+                type: string
+              lastResultURL:
+                type: string
+              lastMessage:
+                type: string
+              observedCommit:
+                type: string
+    subresources:
+      status: {}
+

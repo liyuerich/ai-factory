@@ -1,0 +1,6 @@
+# Local cluster credentials.
+kubeconfig
+
+# Local editor and OS files.
+.DS_Store
+*.swp

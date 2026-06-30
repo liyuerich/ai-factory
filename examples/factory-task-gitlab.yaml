@@ -1,0 +1,25 @@
+apiVersion: factory.ai.gke.io/v1alpha1
+kind: FactoryTask
+metadata:
+  name: validate-gitlab-project
+spec:
+  source:
+    provider: gitlab
+    host: gitlab.example.com
+    repository: platform/ai/ai-factory
+    baseRef: main
+  trigger:
+    type: manual
+    actor: yueli
+  agent:
+    name: builder
+    promptRef: .agents/builder/agent.md
+  sandbox:
+    templateRef: go-dev
+  work:
+    instructions: Validate the factory-runtime-proxy spec from inside a sandbox.
+    commands:
+    - go run ./tool/cmd/tool spec validate factory-runtime-proxy
+  reporting:
+    mode: comment
+

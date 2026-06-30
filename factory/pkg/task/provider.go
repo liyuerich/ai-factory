@@ -12,32 +12,33 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// factory is the main factory application
-package main
+package task
 
 import (
 	"fmt"
-	"os"
-
-	"github.com/ai-on-gke/ai-factory/factory/cmd/factory/runtime"
-	"github.com/ai-on-gke/ai-factory/factory/cmd/factory/task"
-	"github.com/spf13/cobra"
+	"strings"
 )
 
-var rootCmd = &cobra.Command{
-	Use:   "factory",
-	Short: "factory is the main factory application",
-	Long:  `factory is the main factory application`,
-	Run: func(cmd *cobra.Command, args []string) {
-		cmd.Help()
-	},
-}
-
-func main() {
-	rootCmd.AddCommand(runtime.Cmd)
-	rootCmd.AddCommand(task.Cmd)
-	if err := rootCmd.Execute(); err != nil {
-		fmt.Println(err)
-		os.Exit(1)
+// CloneURL returns the explicit clone URL or builds a provider default.
+func (s SourceSpec) CloneURLOrDefault() (string, error) {
+	if s.CloneURL != "" {
+		return s.CloneURL, nil
 	}
+
+	host := s.Host
+	switch s.Provider {
+	case ProviderGitHub:
+		if host == "" {
+			host = "github.com"
+		}
+	case ProviderGitLab:
+		if host == "" {
+			host = "gitlab.com"
+		}
+	default:
+		return "", fmt.Errorf("unsupported git provider %q", s.Provider)
+	}
+
+	repository := strings.TrimPrefix(s.Repository, "/")
+	return fmt.Sprintf("https://%s/%s.git", host, repository), nil
 }

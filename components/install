@@ -35,11 +35,16 @@ kubectl cluster-info >/dev/null
 echo "Installing components..."
 
 INSTALL_CERT_MANAGER=${INSTALL_CERT_MANAGER:-true}
+INSTALL_FACTORY_TASK=${INSTALL_FACTORY_TASK:-true}
 INSTALL_SERVICE_PORTALS=${INSTALL_SERVICE_PORTALS:-false}
 INSTALL_AGENT_SANDBOX=${INSTALL_AGENT_SANDBOX:-true}
 
 if [[ "${INSTALL_CERT_MANAGER}" == "true" ]]; then
     "${DIR}/cert-manager/install"
+fi
+
+if [[ "${INSTALL_FACTORY_TASK}" == "true" ]]; then
+    "${DIR}/factory-task/install"
 fi
 
 if [[ "${INSTALL_SERVICE_PORTALS}" == "true" ]]; then

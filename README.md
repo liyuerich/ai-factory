@@ -69,6 +69,29 @@ KUBECONFIG_MODE=gke CLUSTER_NAME=ai-factory ZONE=us-central1-a components/instal
 
 Optional GKE-oriented components such as `service-portals` are disabled by default and can be enabled with `INSTALL_SERVICE_PORTALS=true`.
 
+The next control-plane layer is `FactoryTask`, a Kubernetes custom resource that captures one coding-agent task without coupling the task to a specific Git provider. A task can reference either GitHub or GitLab repositories through the same source contract:
+
+```yaml
+source:
+  provider: github # or gitlab
+  host: github.com
+  repository: liyuerich/ai-factory
+  baseRef: main
+```
+
+Install the CRD with:
+
+```bash
+components/factory-task/install
+```
+
+Validate or inspect a task locally with:
+
+```bash
+go run ./factory/cmd/factory task validate examples/factory-task-github.yaml
+go run ./factory/cmd/factory task plan examples/factory-task-gitlab.yaml
+```
+
 We follow a **Spec-Driven Development** process for complex features, handled entirely by interacting agents:
 1. **Spec Generation:** The `speccer` agent generates specifications.
 2. **Planning:** The `planner` agent creates detailed implementation plans.
