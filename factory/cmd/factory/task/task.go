@@ -124,12 +124,23 @@ var runOnceOptions struct {
 	timeout time.Duration
 }
 
+var patchStatusOptions struct {
+	namespace        string
+	phase            string
+	message          string
+	reason           string
+	sandboxClaimName string
+	sandboxName      string
+	lastResultURL    string
+	observedCommit   string
+}
+
 var runOnceCmd = &cobra.Command{
 	Use:   "run-once [file]",
 	Short: "Create a SandboxClaim and execute a FactoryTask once with kubectl",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		task, err := readTask(args[0])
+		taskData, task, err := readTaskWithData(args[0])
 		if err != nil {
 			return err
 		}
@@ -144,10 +155,40 @@ var runOnceCmd = &cobra.Command{
 
 		namespace := output.SandboxClaim.Metadata.Namespace
 		claim := output.SandboxClaim.Metadata.Name
+		if err := runKubectlWithInput(taskData, "apply", "-f", "-"); err != nil {
+			return err
+		}
+		if err := patchTaskStatus(namespace, task.Metadata.Name, taskpkg.StatusPatchOptions{
+			Phase:            taskpkg.PhasePending,
+			Reason:           "TaskAccepted",
+			Message:          "FactoryTask accepted by run-once controller",
+			SandboxClaimName: claim,
+		}); err != nil {
+			return err
+		}
 		if err := runKubectlWithInput(manifest, "apply", "-f", "-"); err != nil {
+			_ = patchTaskStatus(namespace, task.Metadata.Name, taskpkg.StatusPatchOptions{
+				Phase:   taskpkg.PhaseFailed,
+				Reason:  "SandboxClaimApplyFailed",
+				Message: err.Error(),
+			})
+			return err
+		}
+		if err := patchTaskStatus(namespace, task.Metadata.Name, taskpkg.StatusPatchOptions{
+			Phase:            taskpkg.PhaseClaimCreated,
+			Reason:           "SandboxClaimCreated",
+			Message:          "SandboxClaim created",
+			SandboxClaimName: claim,
+		}); err != nil {
 			return err
 		}
 		if err := runKubectl(nil, "wait", "sandboxclaim", claim, "-n", namespace, "--for=condition=Ready", "--timeout="+runOnceOptions.timeout.String()); err != nil {
+			_ = patchTaskStatus(namespace, task.Metadata.Name, taskpkg.StatusPatchOptions{
+				Phase:            taskpkg.PhaseFailed,
+				Reason:           "SandboxClaimReadyTimeout",
+				Message:          err.Error(),
+				SandboxClaimName: claim,
+			})
 			return err
 		}
 
@@ -159,15 +200,70 @@ var runOnceCmd = &cobra.Command{
 		if sandboxName == "" {
 			return fmt.Errorf("sandboxclaim %s/%s is ready but status.sandboxName is empty", namespace, claim)
 		}
+		if err := patchTaskStatus(namespace, task.Metadata.Name, taskpkg.StatusPatchOptions{
+			Phase:            taskpkg.PhaseSandboxReady,
+			Reason:           "SandboxReady",
+			Message:          "SandboxClaim is ready",
+			SandboxClaimName: claim,
+			SandboxName:      sandboxName,
+		}); err != nil {
+			return err
+		}
+		if err := patchTaskStatus(namespace, task.Metadata.Name, taskpkg.StatusPatchOptions{
+			Phase:            taskpkg.PhaseRunning,
+			Reason:           "RunOnceStarted",
+			Message:          "Executing generated plan",
+			SandboxClaimName: claim,
+			SandboxName:      sandboxName,
+		}); err != nil {
+			return err
+		}
 
 		for _, step := range output.Plan.Steps {
 			fmt.Fprintf(cmd.OutOrStdout(), "--- RUN: %s\n", step.Name)
 			if err := runKubectl(nil, append([]string{"exec", "-n", namespace, sandboxName, "-c", output.Plan.ContainerName, "--"}, step.Command...)...); err != nil {
+				_ = patchTaskStatus(namespace, task.Metadata.Name, taskpkg.StatusPatchOptions{
+					Phase:            taskpkg.PhaseFailed,
+					Reason:           "StepFailed",
+					Message:          fmt.Sprintf("%s: %v", step.Name, err),
+					SandboxClaimName: claim,
+					SandboxName:      sandboxName,
+				})
 				return fmt.Errorf("%s: %w", step.Name, err)
 			}
 		}
+		if err := patchTaskStatus(namespace, task.Metadata.Name, taskpkg.StatusPatchOptions{
+			Phase:            taskpkg.PhaseSucceeded,
+			Reason:           "RunOnceSucceeded",
+			Message:          "FactoryTask completed successfully",
+			SandboxClaimName: claim,
+			SandboxName:      sandboxName,
+		}); err != nil {
+			return err
+		}
 		fmt.Fprintln(cmd.OutOrStdout(), "PASS")
 		return nil
+	},
+}
+
+var patchStatusCmd = &cobra.Command{
+	Use:   "patch-status [task-name]",
+	Short: "Patch the status subresource of a FactoryTask",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		namespace := patchStatusOptions.namespace
+		if namespace == "" {
+			namespace = "default"
+		}
+		return patchTaskStatus(namespace, args[0], taskpkg.StatusPatchOptions{
+			Phase:            patchStatusOptions.phase,
+			Reason:           patchStatusOptions.reason,
+			Message:          patchStatusOptions.message,
+			SandboxClaimName: patchStatusOptions.sandboxClaimName,
+			SandboxName:      patchStatusOptions.sandboxName,
+			LastResultURL:    patchStatusOptions.lastResultURL,
+			ObservedCommit:   patchStatusOptions.observedCommit,
+		})
 	},
 }
 
@@ -177,15 +273,41 @@ func init() {
 	Cmd.AddCommand(controllerCmd)
 	controllerCmd.AddCommand(manifestCmd)
 	controllerCmd.AddCommand(runOnceCmd)
+	controllerCmd.AddCommand(patchStatusCmd)
 	runOnceCmd.Flags().DurationVar(&runOnceOptions.timeout, "timeout", 5*time.Minute, "time to wait for the SandboxClaim to become Ready")
+	patchStatusCmd.Flags().StringVarP(&patchStatusOptions.namespace, "namespace", "n", "default", "FactoryTask namespace")
+	patchStatusCmd.Flags().StringVar(&patchStatusOptions.phase, "phase", taskpkg.PhasePending, "FactoryTask phase")
+	patchStatusCmd.Flags().StringVar(&patchStatusOptions.message, "message", "", "status message")
+	patchStatusCmd.Flags().StringVar(&patchStatusOptions.reason, "reason", "ManualPatch", "condition reason")
+	patchStatusCmd.Flags().StringVar(&patchStatusOptions.sandboxClaimName, "sandbox-claim-name", "", "SandboxClaim name")
+	patchStatusCmd.Flags().StringVar(&patchStatusOptions.sandboxName, "sandbox-name", "", "sandbox name")
+	patchStatusCmd.Flags().StringVar(&patchStatusOptions.lastResultURL, "last-result-url", "", "URL for the latest result")
+	patchStatusCmd.Flags().StringVar(&patchStatusOptions.observedCommit, "observed-commit", "", "observed source commit")
 }
 
 func readTask(path string) (*taskpkg.FactoryTask, error) {
+	_, task, err := readTaskWithData(path)
+	return task, err
+}
+
+func readTaskWithData(path string) ([]byte, *taskpkg.FactoryTask, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("read task file: %w", err)
+		return nil, nil, fmt.Errorf("read task file: %w", err)
 	}
-	return taskpkg.Parse(data)
+	task, err := taskpkg.Parse(data)
+	if err != nil {
+		return nil, nil, err
+	}
+	return data, task, nil
+}
+
+func patchTaskStatus(namespace, name string, opts taskpkg.StatusPatchOptions) error {
+	patch, err := taskpkg.StatusMergePatch(opts)
+	if err != nil {
+		return err
+	}
+	return runKubectl(nil, "patch", "factorytask", name, "-n", namespace, "--type=merge", "--subresource=status", "-p", string(patch))
 }
 
 func runKubectl(stdin []byte, args ...string) error {

@@ -104,7 +104,18 @@ Run one task against the active `kubectl` context:
 go run ./factory/cmd/factory task controller run-once examples/factory-task-github.yaml
 ```
 
-The `run-once` command is the first controller slice: it creates the `SandboxClaim`, waits for agent-sandbox to bind a sandbox, and executes the generated plan inside the sandbox container. A long-running watch controller and GitHub/GitLab issue webhooks are still future layers.
+The `run-once` command is the first controller slice: it applies the `FactoryTask`, patches task status through the task lifecycle, creates the `SandboxClaim`, waits for agent-sandbox to bind a sandbox, and executes the generated plan inside the sandbox container.
+
+Patch task status directly when debugging a controller transition:
+
+```bash
+go run ./factory/cmd/factory task controller patch-status validate-ai-factory-spec \
+  --phase Running \
+  --reason ManualDebug \
+  --message "debugging status patch"
+```
+
+A long-running watch controller and GitHub/GitLab issue webhooks are still future layers.
 
 We follow a **Spec-Driven Development** process for complex features, handled entirely by interacting agents:
 1. **Spec Generation:** The `speccer` agent generates specifications.

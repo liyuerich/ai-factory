@@ -15,8 +15,10 @@
 package task
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestParseValidGitHubTask(t *testing.T) {
@@ -238,5 +240,41 @@ spec:
 	}
 	if !strings.Contains(string(data), "kind: SandboxClaim") {
 		t.Fatalf("SandboxClaimYAML() = %s", data)
+	}
+}
+
+func TestStatusMergePatch(t *testing.T) {
+	patch, err := StatusMergePatch(StatusPatchOptions{
+		Phase:            PhaseRunning,
+		Message:          "executing generated plan",
+		Reason:           "RunOnceStarted",
+		SandboxClaimName: "validate-claim",
+		SandboxName:      "validate-sandbox",
+		Now:              time.Date(2026, 6, 30, 1, 2, 3, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("StatusMergePatch() error = %v", err)
+	}
+
+	var got struct {
+		Status FactoryTaskStatus `json:"status"`
+	}
+	if err := json.Unmarshal(patch, &got); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if got.Status.Phase != PhaseRunning {
+		t.Fatalf("phase = %q", got.Status.Phase)
+	}
+	if got.Status.StartedAt != "2026-06-30T01:02:03Z" {
+		t.Fatalf("startedAt = %q", got.Status.StartedAt)
+	}
+	if got.Status.CompletedAt != "" {
+		t.Fatalf("completedAt = %q, want empty for running phase", got.Status.CompletedAt)
+	}
+	if len(got.Status.Conditions) != 1 {
+		t.Fatalf("conditions length = %d", len(got.Status.Conditions))
+	}
+	if got.Status.Conditions[0].Reason != "RunOnceStarted" {
+		t.Fatalf("condition reason = %q", got.Status.Conditions[0].Reason)
 	}
 }
