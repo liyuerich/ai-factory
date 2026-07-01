@@ -115,7 +115,15 @@ go run ./factory/cmd/factory task controller patch-status validate-ai-factory-sp
   --message "debugging status patch"
 ```
 
-A long-running watch controller and GitHub/GitLab issue webhooks are still future layers.
+Run the first long-running controller loop against the active `kubectl` context:
+
+```bash
+go run ./factory/cmd/factory task controller watch --namespace default
+```
+
+The watch controller polls `FactoryTask` resources, reconciles tasks whose phase is empty, `Pending`, `ClaimCreated`, or `SandboxReady`, creates the matching `SandboxClaim`, executes the generated plan, and patches status. Use `--once` for a single reconciliation pass and `--retry-failed` to retry failed tasks.
+
+GitHub/GitLab issue webhooks are still a future layer.
 
 We follow a **Spec-Driven Development** process for complex features, handled entirely by interacting agents:
 1. **Spec Generation:** The `speccer` agent generates specifications.
