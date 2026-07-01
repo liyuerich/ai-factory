@@ -21,5 +21,6 @@ spec:
     commands:
     - go run ./tool/cmd/tool spec validate factory-runtime-proxy
   reporting:
+    provider: github
     mode: comment
-
+    targetURL: https://github.com/liyuerich/ai-factory/issues/1

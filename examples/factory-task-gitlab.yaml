@@ -21,5 +21,6 @@ spec:
     commands:
     - go run ./tool/cmd/tool spec validate factory-runtime-proxy
   reporting:
+    provider: gitlab
     mode: comment
-
+    targetURL: https://gitlab.example.com/platform/ai/ai-factory/-/issues/1

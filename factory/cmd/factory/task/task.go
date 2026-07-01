@@ -17,6 +17,7 @@ package task
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -100,6 +101,62 @@ var controllerCmd = &cobra.Command{
 	},
 }
 
+var reportCmd = &cobra.Command{
+	Use:   "report",
+	Short: "Report FactoryTask results to external systems",
+	Long:  `Report commands write FactoryTask execution results back to provider-neutral targets.`,
+	Run: func(cmd *cobra.Command, args []string) {
+		cmd.Help()
+	},
+}
+
+var reportCommentOptions struct {
+	message string
+	token   string
+	apiBase string
+	dryRun  bool
+}
+
+var reportCommentCmd = &cobra.Command{
+	Use:   "comment [file]",
+	Short: "Write a FactoryTask result comment to GitHub or GitLab",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		task, err := readTask(args[0])
+		if err != nil {
+			return err
+		}
+		message := reportCommentOptions.message
+		if strings.TrimSpace(message) == "" {
+			message = buildReportMessage(task, "Manual", "FactoryTask report requested manually")
+		}
+		opts := taskpkg.CommentReportOptions{
+			Provider:  reportingProvider(task),
+			TargetURL: task.Spec.Reporting.TargetURL,
+			Body:      message,
+			Token:     reportCommentOptions.token,
+			APIBase:   reportCommentOptions.apiBase,
+		}
+		if reportCommentOptions.dryRun {
+			if opts.Token == "" {
+				opts.Token = "dry-run-token"
+			}
+			req, err := taskpkg.BuildCommentRequest(opts)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "provider=%s method=%s url=%s\n", req.Provider, req.Method, req.URL)
+			fmt.Fprintf(cmd.OutOrStdout(), "body=%s\n", string(req.Body))
+			return nil
+		}
+		if err := taskpkg.PostIssueComment(context.Background(), opts); err != nil {
+			return err
+		}
+		fmt.Fprintf(cmd.OutOrStdout(), "--- PASS: comment %s\n", task.Spec.Reporting.TargetURL)
+		return nil
+	},
+}
+
 var manifestCmd = &cobra.Command{
 	Use:   "manifest [file]",
 	Short: "Render the SandboxClaim manifest a FactoryTask would create",
@@ -124,6 +181,7 @@ var manifestCmd = &cobra.Command{
 
 var runOnceOptions struct {
 	timeout time.Duration
+	report  bool
 }
 
 var watchOptions struct {
@@ -132,6 +190,7 @@ var watchOptions struct {
 	timeout     time.Duration
 	once        bool
 	retryFailed bool
+	report      bool
 }
 
 var patchStatusOptions struct {
@@ -213,17 +272,25 @@ var patchStatusCmd = &cobra.Command{
 func init() {
 	Cmd.AddCommand(validateCmd)
 	Cmd.AddCommand(planCmd)
+	Cmd.AddCommand(reportCmd)
 	Cmd.AddCommand(controllerCmd)
+	reportCmd.AddCommand(reportCommentCmd)
 	controllerCmd.AddCommand(manifestCmd)
 	controllerCmd.AddCommand(runOnceCmd)
 	controllerCmd.AddCommand(watchCmd)
 	controllerCmd.AddCommand(patchStatusCmd)
 	runOnceCmd.Flags().DurationVar(&runOnceOptions.timeout, "timeout", 5*time.Minute, "time to wait for the SandboxClaim to become Ready")
+	runOnceCmd.Flags().BoolVar(&runOnceOptions.report, "report", true, "write reporting.comment results when spec.reporting is configured")
+	reportCommentCmd.Flags().StringVar(&reportCommentOptions.message, "message", "", "comment body to write")
+	reportCommentCmd.Flags().StringVar(&reportCommentOptions.token, "token", "", "provider API token; defaults to GITHUB_TOKEN or GITLAB_TOKEN")
+	reportCommentCmd.Flags().StringVar(&reportCommentOptions.apiBase, "api-base", "", "override provider API base URL")
+	reportCommentCmd.Flags().BoolVar(&reportCommentOptions.dryRun, "dry-run", false, "print the comment request without sending it")
 	watchCmd.Flags().StringVarP(&watchOptions.namespace, "namespace", "n", "default", "FactoryTask namespace")
 	watchCmd.Flags().DurationVar(&watchOptions.interval, "interval", 15*time.Second, "time between FactoryTask list polls")
 	watchCmd.Flags().DurationVar(&watchOptions.timeout, "timeout", 5*time.Minute, "time to wait for each SandboxClaim to become Ready")
 	watchCmd.Flags().BoolVar(&watchOptions.once, "once", false, "list and reconcile once, then exit")
 	watchCmd.Flags().BoolVar(&watchOptions.retryFailed, "retry-failed", false, "reconcile FactoryTasks whose phase is Failed")
+	watchCmd.Flags().BoolVar(&watchOptions.report, "report", true, "write reporting.comment results when spec.reporting is configured")
 	patchStatusCmd.Flags().StringVarP(&patchStatusOptions.namespace, "namespace", "n", "default", "FactoryTask namespace")
 	patchStatusCmd.Flags().StringVar(&patchStatusOptions.phase, "phase", taskpkg.PhasePending, "FactoryTask phase")
 	patchStatusCmd.Flags().StringVar(&patchStatusOptions.message, "message", "", "status message")
@@ -290,6 +357,7 @@ func executeTask(out io.Writer, task *taskpkg.FactoryTask, taskData []byte, appl
 			Reason:  "SandboxClaimApplyFailed",
 			Message: err.Error(),
 		})
+		reportTaskResult(out, task, taskpkg.PhaseFailed, fmt.Sprintf("SandboxClaim apply failed: %v", err), reportingEnabled(controllerName))
 		return err
 	}
 	if err := patchTaskStatus(namespace, task.Metadata.Name, taskpkg.StatusPatchOptions{
@@ -307,6 +375,7 @@ func executeTask(out io.Writer, task *taskpkg.FactoryTask, taskData []byte, appl
 			Message:          err.Error(),
 			SandboxClaimName: claim,
 		})
+		reportTaskResult(out, task, taskpkg.PhaseFailed, fmt.Sprintf("SandboxClaim ready wait failed: %v", err), reportingEnabled(controllerName))
 		return err
 	}
 
@@ -347,6 +416,7 @@ func executeTask(out io.Writer, task *taskpkg.FactoryTask, taskData []byte, appl
 				SandboxClaimName: claim,
 				SandboxName:      sandboxName,
 			})
+			reportTaskResult(out, task, taskpkg.PhaseFailed, fmt.Sprintf("%s failed: %v", step.Name, err), reportingEnabled(controllerName))
 			return fmt.Errorf("%s: %w", step.Name, err)
 		}
 	}
@@ -359,8 +429,51 @@ func executeTask(out io.Writer, task *taskpkg.FactoryTask, taskData []byte, appl
 	}); err != nil {
 		return err
 	}
+	reportTaskResult(out, task, taskpkg.PhaseSucceeded, "FactoryTask completed successfully", reportingEnabled(controllerName))
 	fmt.Fprintln(out, "PASS")
 	return nil
+}
+
+func reportingEnabled(controllerName string) bool {
+	switch controllerName {
+	case "run-once":
+		return runOnceOptions.report
+	case "watch-controller":
+		return watchOptions.report
+	default:
+		return true
+	}
+}
+
+func reportTaskResult(out io.Writer, task *taskpkg.FactoryTask, phase, message string, enabled bool) {
+	if !enabled || task.Spec.Reporting.Mode != "comment" || task.Spec.Reporting.TargetURL == "" {
+		return
+	}
+	body := buildReportMessage(task, phase, message)
+	if err := taskpkg.PostIssueComment(context.Background(), taskpkg.CommentReportOptions{
+		Provider:  reportingProvider(task),
+		TargetURL: task.Spec.Reporting.TargetURL,
+		Body:      body,
+	}); err != nil {
+		fmt.Fprintf(out, "--- REPORT FAILED: %v\n", err)
+		return
+	}
+	fmt.Fprintf(out, "--- REPORT: comment %s\n", task.Spec.Reporting.TargetURL)
+}
+
+func buildReportMessage(task *taskpkg.FactoryTask, phase, message string) string {
+	name := task.Metadata.Name
+	if ns := namespaceForTask(task); ns != "" {
+		name = ns + "/" + name
+	}
+	return fmt.Sprintf("FactoryTask `%s` %s\n\n%s", name, phase, message)
+}
+
+func reportingProvider(task *taskpkg.FactoryTask) string {
+	if task.Spec.Reporting.Provider != "" {
+		return task.Spec.Reporting.Provider
+	}
+	return task.Spec.Source.Provider
 }
 
 type factoryTaskList struct {

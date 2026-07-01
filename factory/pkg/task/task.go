@@ -102,6 +102,7 @@ type WorkSpec struct {
 
 // ReportingSpec describes how execution results should be reported.
 type ReportingSpec struct {
+	Provider  string `yaml:"provider,omitempty"`
 	Mode      string `yaml:"mode,omitempty"`
 	TargetURL string `yaml:"targetURL,omitempty"`
 }
@@ -177,6 +178,11 @@ func (s FactoryTaskSpec) validate() []error {
 		if _, err := url.ParseRequestURI(s.Reporting.TargetURL); err != nil {
 			errs = append(errs, fmt.Errorf("spec.reporting.targetURL must be a valid URL: %w", err))
 		}
+	}
+	switch s.Reporting.Provider {
+	case "", ProviderGitHub, ProviderGitLab:
+	default:
+		errs = append(errs, fmt.Errorf("spec.reporting.provider must be %q or %q", ProviderGitHub, ProviderGitLab))
 	}
 	return errs
 }
