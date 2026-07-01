@@ -114,6 +114,11 @@ spec:
               reporting:
                 type: object
                 properties:
+                  provider:
+                    type: string
+                    enum:
+                    - github
+                    - gitlab
                   mode:
                     type: string
                   targetURL:

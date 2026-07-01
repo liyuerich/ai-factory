@@ -103,3 +103,33 @@ func TestFactoryTaskListJSON(t *testing.T) {
 		t.Fatalf("status.phase = %q", item.Status.Phase)
 	}
 }
+
+func TestReportingProviderFallsBackToSource(t *testing.T) {
+	task := &taskpkg.FactoryTask{
+		Spec: taskpkg.FactoryTaskSpec{
+			Source: taskpkg.SourceSpec{Provider: taskpkg.ProviderGitHub},
+		},
+	}
+	if got := reportingProvider(task); got != taskpkg.ProviderGitHub {
+		t.Fatalf("reportingProvider() = %q, want %q", got, taskpkg.ProviderGitHub)
+	}
+
+	task.Spec.Reporting.Provider = taskpkg.ProviderGitLab
+	if got := reportingProvider(task); got != taskpkg.ProviderGitLab {
+		t.Fatalf("reportingProvider() = %q, want %q", got, taskpkg.ProviderGitLab)
+	}
+}
+
+func TestBuildReportMessage(t *testing.T) {
+	task := &taskpkg.FactoryTask{
+		Metadata: taskpkg.ObjectMeta{
+			Name:      "validate-ai-factory",
+			Namespace: "factory-system",
+		},
+	}
+	got := buildReportMessage(task, taskpkg.PhaseSucceeded, "done")
+	want := "FactoryTask `factory-system/validate-ai-factory` Succeeded\n\ndone"
+	if got != want {
+		t.Fatalf("buildReportMessage() = %q, want %q", got, want)
+	}
+}
