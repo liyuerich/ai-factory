@@ -85,6 +85,9 @@ var planCmd = &cobra.Command{
 		out := cmd.OutOrStdout()
 		fmt.Fprintf(out, "task=%s provider=%s repository=%s\n", plan.TaskName, plan.Provider, plan.Repository)
 		fmt.Fprintf(out, "cloneURL=%s baseRef=%s\n", plan.CloneURL, plan.BaseRef)
+		if task.Spec.ChangeRequest.Enabled {
+			fmt.Fprintf(out, "changeBranch=%s targetBranch=%s\n", plan.ChangeBranch, plan.TargetBranch)
+		}
 		fmt.Fprintf(out, "sandboxTemplate=%s sandboxClaim=%s container=%s agent=%s\n", plan.SandboxTemplate, plan.SandboxClaim, plan.ContainerName, plan.AgentName)
 		for _, step := range plan.Steps {
 			fmt.Fprintf(out, "- %s: %s\n", step.Name, strings.Join(step.Command, " "))

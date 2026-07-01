@@ -56,12 +56,13 @@ type ObjectMeta struct {
 // FactoryTaskSpec describes where code lives, what should run, and where
 // results should be reported.
 type FactoryTaskSpec struct {
-	Source    SourceSpec    `yaml:"source"`
-	Trigger   TriggerSpec   `yaml:"trigger,omitempty"`
-	Agent     AgentSpec     `yaml:"agent"`
-	Sandbox   SandboxSpec   `yaml:"sandbox"`
-	Work      WorkSpec      `yaml:"work"`
-	Reporting ReportingSpec `yaml:"reporting,omitempty"`
+	Source        SourceSpec        `yaml:"source"`
+	Trigger       TriggerSpec       `yaml:"trigger,omitempty"`
+	Agent         AgentSpec         `yaml:"agent"`
+	Sandbox       SandboxSpec       `yaml:"sandbox"`
+	Work          WorkSpec          `yaml:"work"`
+	ChangeRequest ChangeRequestSpec `yaml:"changeRequest,omitempty"`
+	Reporting     ReportingSpec     `yaml:"reporting,omitempty"`
 }
 
 // SourceSpec identifies a repository on GitHub, GitLab, or compatible hosts.
@@ -98,6 +99,20 @@ type SandboxSpec struct {
 type WorkSpec struct {
 	Instructions string   `yaml:"instructions"`
 	Commands     []string `yaml:"commands,omitempty"`
+}
+
+// ChangeRequestSpec describes branch, commit, and push behavior for code changes.
+type ChangeRequestSpec struct {
+	Enabled       bool   `yaml:"enabled,omitempty"`
+	BranchName    string `yaml:"branchName,omitempty"`
+	BranchPrefix  string `yaml:"branchPrefix,omitempty"`
+	TargetBranch  string `yaml:"targetBranch,omitempty"`
+	CommitMessage string `yaml:"commitMessage,omitempty"`
+	AuthorName    string `yaml:"authorName,omitempty"`
+	AuthorEmail   string `yaml:"authorEmail,omitempty"`
+	Title         string `yaml:"title,omitempty"`
+	Body          string `yaml:"body,omitempty"`
+	RemoteName    string `yaml:"remoteName,omitempty"`
 }
 
 // ReportingSpec describes how execution results should be reported.
@@ -174,6 +189,7 @@ func (s FactoryTaskSpec) validate() []error {
 	if strings.TrimSpace(s.Work.Instructions) == "" && len(s.Work.Commands) == 0 {
 		errs = append(errs, errors.New("spec.work.instructions or spec.work.commands is required"))
 	}
+	errs = append(errs, s.ChangeRequest.validate()...)
 	if s.Reporting.TargetURL != "" {
 		if _, err := url.ParseRequestURI(s.Reporting.TargetURL); err != nil {
 			errs = append(errs, fmt.Errorf("spec.reporting.targetURL must be a valid URL: %w", err))
@@ -183,6 +199,17 @@ func (s FactoryTaskSpec) validate() []error {
 	case "", ProviderGitHub, ProviderGitLab:
 	default:
 		errs = append(errs, fmt.Errorf("spec.reporting.provider must be %q or %q", ProviderGitHub, ProviderGitLab))
+	}
+	return errs
+}
+
+func (s ChangeRequestSpec) validate() []error {
+	if !s.Enabled {
+		return nil
+	}
+	var errs []error
+	if strings.TrimSpace(s.BranchName) != "" && strings.TrimSpace(s.BranchPrefix) != "" {
+		errs = append(errs, errors.New("spec.changeRequest.branchName and spec.changeRequest.branchPrefix are mutually exclusive"))
 	}
 	return errs
 }
