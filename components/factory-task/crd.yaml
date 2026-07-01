@@ -111,6 +111,29 @@ spec:
                     type: array
                     items:
                       type: string
+              changeRequest:
+                type: object
+                properties:
+                  enabled:
+                    type: boolean
+                  branchName:
+                    type: string
+                  branchPrefix:
+                    type: string
+                  targetBranch:
+                    type: string
+                  commitMessage:
+                    type: string
+                  authorName:
+                    type: string
+                  authorEmail:
+                    type: string
+                  title:
+                    type: string
+                  body:
+                    type: string
+                  remoteName:
+                    type: string
               reporting:
                 type: object
                 properties:

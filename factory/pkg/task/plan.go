@@ -26,6 +26,8 @@ type ExecutionPlan struct {
 	Repository      string
 	CloneURL        string
 	BaseRef         string
+	ChangeBranch    string
+	TargetBranch    string
 	AgentName       string
 	SandboxTemplate string
 	SandboxClaim    string
@@ -51,6 +53,7 @@ func BuildExecutionPlan(task *FactoryTask) (*ExecutionPlan, error) {
 	if err != nil {
 		return nil, err
 	}
+	changeBranch, targetBranch, remoteName, commitMessage, authorName, authorEmail := changeRequestDefaults(task)
 
 	claimName := task.Spec.Sandbox.ClaimName
 	if claimName == "" {
@@ -68,6 +71,8 @@ func BuildExecutionPlan(task *FactoryTask) (*ExecutionPlan, error) {
 		Repository:      task.Spec.Source.Repository,
 		CloneURL:        cloneURL,
 		BaseRef:         task.Spec.Source.BaseRef,
+		ChangeBranch:    changeBranch,
+		TargetBranch:    targetBranch,
 		AgentName:       task.Spec.Agent.Name,
 		SandboxTemplate: task.Spec.Sandbox.TemplateRef,
 		SandboxClaim:    claimName,
@@ -85,6 +90,13 @@ func BuildExecutionPlan(task *FactoryTask) (*ExecutionPlan, error) {
 		},
 	}
 
+	if task.Spec.ChangeRequest.Enabled {
+		plan.Steps = append(plan.Steps, ExecutionStep{
+			Name:    "create change branch",
+			Command: []string{"git", "-C", workDir, "checkout", "-B", changeBranch},
+		})
+	}
+
 	for i, command := range task.Spec.Work.Commands {
 		plan.Steps = append(plan.Steps, ExecutionStep{
 			Name:    fmt.Sprintf("run command %d", i+1),
@@ -92,7 +104,61 @@ func BuildExecutionPlan(task *FactoryTask) (*ExecutionPlan, error) {
 		})
 	}
 
+	if task.Spec.ChangeRequest.Enabled {
+		plan.Steps = append(plan.Steps,
+			ExecutionStep{
+				Name:    "commit changes",
+				Command: []string{"/bin/sh", "-lc", commitChangesScript(workDir, commitMessage, authorName, authorEmail)},
+			},
+			ExecutionStep{
+				Name:    "push change branch",
+				Command: []string{"/bin/sh", "-lc", pushChangeBranchScript(workDir, remoteName, changeBranch, targetBranch)},
+			},
+		)
+	}
+
 	return plan, nil
+}
+
+func changeRequestDefaults(task *FactoryTask) (string, string, string, string, string, string) {
+	spec := task.Spec.ChangeRequest
+	targetBranch := spec.TargetBranch
+	if targetBranch == "" {
+		targetBranch = task.Spec.Source.BaseRef
+	}
+	branchName := spec.BranchName
+	if branchName == "" {
+		prefix := spec.BranchPrefix
+		if prefix == "" {
+			prefix = "factory-task"
+		}
+		branchName = fmt.Sprintf("%s/%s", strings.Trim(prefix, "/"), dnsLabel(task.Metadata.Name))
+	}
+	remoteName := spec.RemoteName
+	if remoteName == "" {
+		remoteName = "origin"
+	}
+	commitMessage := spec.CommitMessage
+	if commitMessage == "" {
+		commitMessage = fmt.Sprintf("Apply FactoryTask %s", task.Metadata.Name)
+	}
+	authorName := spec.AuthorName
+	if authorName == "" {
+		authorName = "ai-factory"
+	}
+	authorEmail := spec.AuthorEmail
+	if authorEmail == "" {
+		authorEmail = "ai-factory@example.invalid"
+	}
+	return branchName, targetBranch, remoteName, commitMessage, authorName, authorEmail
+}
+
+func commitChangesScript(workDir, commitMessage, authorName, authorEmail string) string {
+	return fmt.Sprintf("cd %s && if git diff --quiet && git diff --cached --quiet; then echo 'No changes to commit'; else git add -A && git -c user.name=%s -c user.email=%s commit -m %s; fi", shellQuote(workDir), shellQuote(authorName), shellQuote(authorEmail), shellQuote(commitMessage))
+}
+
+func pushChangeBranchScript(workDir, remoteName, branchName, targetBranch string) string {
+	return fmt.Sprintf("cd %s && if [ \"$(git rev-parse HEAD)\" = \"$(git rev-parse %s)\" ]; then echo 'No change branch push needed'; else git push -u %s %s; fi", shellQuote(workDir), shellQuote(targetBranch), shellQuote(remoteName), shellQuote(branchName))
 }
 
 func shellQuote(value string) string {
