@@ -1,0 +1,21 @@
+{
+  "object_kind": "issue",
+  "event_type": "issue",
+  "user": {
+    "username": "yueli",
+    "name": "Yue Li"
+  },
+  "project": {
+    "path_with_namespace": "platform/ai/ai-factory",
+    "web_url": "https://gitlab.example.com/platform/ai/ai-factory",
+    "default_branch": "main",
+    "git_http_url": "https://gitlab.example.com/platform/ai/ai-factory.git"
+  },
+  "object_attributes": {
+    "iid": 7,
+    "title": "Validate ai-factory from a GitLab issue",
+    "description": "Run the factory-runtime-proxy spec validation in a sandbox.",
+    "url": "https://gitlab.example.com/platform/ai/ai-factory/-/issues/7",
+    "action": "open"
+  }
+}

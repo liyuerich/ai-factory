@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"strings"
@@ -157,6 +158,67 @@ var reportCommentCmd = &cobra.Command{
 	},
 }
 
+var webhookCmd = &cobra.Command{
+	Use:   "webhook",
+	Short: "Convert issue webhooks into FactoryTasks",
+	Long:  `Webhook commands receive GitHub or GitLab issue events and render FactoryTask resources.`,
+	Run: func(cmd *cobra.Command, args []string) {
+		cmd.Help()
+	},
+}
+
+var webhookOptions struct {
+	provider           string
+	namespace          string
+	agent              string
+	promptRef          string
+	sandboxTemplateRef string
+	containerName      string
+	reportingMode      string
+	command            []string
+}
+
+var webhookRenderCmd = &cobra.Command{
+	Use:   "render [payload-file]",
+	Short: "Render a FactoryTask from a GitHub or GitLab issue webhook payload",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		payload, err := readPayload(args[0])
+		if err != nil {
+			return err
+		}
+		task, err := taskpkg.FactoryTaskFromIssueWebhook(payload, issueWebhookOptions())
+		if err != nil {
+			return err
+		}
+		data, err := taskpkg.FactoryTaskYAML(task)
+		if err != nil {
+			return err
+		}
+		_, err = cmd.OutOrStdout().Write(data)
+		return err
+	},
+}
+
+var webhookServeOptions struct {
+	addr         string
+	secret       string
+	apply        bool
+	responseYAML bool
+}
+
+var webhookServeCmd = &cobra.Command{
+	Use:   "serve",
+	Short: "Serve GitHub and GitLab issue webhook endpoints",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		mux := http.NewServeMux()
+		mux.HandleFunc("/webhook/github", issueWebhookHandler(cmd, taskpkg.ProviderGitHub))
+		mux.HandleFunc("/webhook/gitlab", issueWebhookHandler(cmd, taskpkg.ProviderGitLab))
+		fmt.Fprintf(cmd.OutOrStdout(), "listening on %s\n", webhookServeOptions.addr)
+		return http.ListenAndServe(webhookServeOptions.addr, mux)
+	},
+}
+
 var manifestCmd = &cobra.Command{
 	Use:   "manifest [file]",
 	Short: "Render the SandboxClaim manifest a FactoryTask would create",
@@ -273,8 +335,11 @@ func init() {
 	Cmd.AddCommand(validateCmd)
 	Cmd.AddCommand(planCmd)
 	Cmd.AddCommand(reportCmd)
+	Cmd.AddCommand(webhookCmd)
 	Cmd.AddCommand(controllerCmd)
 	reportCmd.AddCommand(reportCommentCmd)
+	webhookCmd.AddCommand(webhookRenderCmd)
+	webhookCmd.AddCommand(webhookServeCmd)
 	controllerCmd.AddCommand(manifestCmd)
 	controllerCmd.AddCommand(runOnceCmd)
 	controllerCmd.AddCommand(watchCmd)
@@ -285,6 +350,18 @@ func init() {
 	reportCommentCmd.Flags().StringVar(&reportCommentOptions.token, "token", "", "provider API token; defaults to GITHUB_TOKEN or GITLAB_TOKEN")
 	reportCommentCmd.Flags().StringVar(&reportCommentOptions.apiBase, "api-base", "", "override provider API base URL")
 	reportCommentCmd.Flags().BoolVar(&reportCommentOptions.dryRun, "dry-run", false, "print the comment request without sending it")
+	webhookCmd.PersistentFlags().StringVarP(&webhookOptions.namespace, "namespace", "n", "default", "FactoryTask namespace")
+	webhookCmd.PersistentFlags().StringVar(&webhookOptions.agent, "agent", "builder", "agent name for generated FactoryTasks")
+	webhookCmd.PersistentFlags().StringVar(&webhookOptions.promptRef, "prompt-ref", "", "agent prompt reference")
+	webhookCmd.PersistentFlags().StringVar(&webhookOptions.sandboxTemplateRef, "sandbox-template", "go-dev", "sandbox template reference")
+	webhookCmd.PersistentFlags().StringVar(&webhookOptions.containerName, "container", "", "sandbox container name")
+	webhookCmd.PersistentFlags().StringVar(&webhookOptions.reportingMode, "reporting-mode", "comment", "reporting mode for generated FactoryTasks")
+	webhookCmd.PersistentFlags().StringArrayVar(&webhookOptions.command, "command", nil, "command to run in the generated FactoryTask; can be repeated")
+	webhookRenderCmd.Flags().StringVar(&webhookOptions.provider, "provider", taskpkg.ProviderGitHub, "webhook provider: github or gitlab")
+	webhookServeCmd.Flags().StringVar(&webhookServeOptions.addr, "addr", ":8080", "listen address")
+	webhookServeCmd.Flags().StringVar(&webhookServeOptions.secret, "secret", "", "webhook secret for GitHub signatures or GitLab tokens")
+	webhookServeCmd.Flags().BoolVar(&webhookServeOptions.apply, "apply", false, "apply generated FactoryTasks with kubectl")
+	webhookServeCmd.Flags().BoolVar(&webhookServeOptions.responseYAML, "response-yaml", false, "write generated FactoryTask YAML in HTTP responses")
 	watchCmd.Flags().StringVarP(&watchOptions.namespace, "namespace", "n", "default", "FactoryTask namespace")
 	watchCmd.Flags().DurationVar(&watchOptions.interval, "interval", 15*time.Second, "time between FactoryTask list polls")
 	watchCmd.Flags().DurationVar(&watchOptions.timeout, "timeout", 5*time.Minute, "time to wait for each SandboxClaim to become Ready")
@@ -316,6 +393,85 @@ func readTaskWithData(path string) ([]byte, *taskpkg.FactoryTask, error) {
 		return nil, nil, err
 	}
 	return data, task, nil
+}
+
+func readPayload(path string) ([]byte, error) {
+	if path == "-" {
+		return io.ReadAll(os.Stdin)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read webhook payload: %w", err)
+	}
+	return data, nil
+}
+
+func issueWebhookOptions() taskpkg.IssueWebhookOptions {
+	return taskpkg.IssueWebhookOptions{
+		Provider:           webhookOptions.provider,
+		Namespace:          webhookOptions.namespace,
+		AgentName:          webhookOptions.agent,
+		PromptRef:          webhookOptions.promptRef,
+		SandboxTemplateRef: webhookOptions.sandboxTemplateRef,
+		ContainerName:      webhookOptions.containerName,
+		ReportingMode:      webhookOptions.reportingMode,
+		Commands:           webhookOptions.command,
+	}
+}
+
+func issueWebhookHandler(cmd *cobra.Command, provider string) http.HandlerFunc {
+	return func(w http.ResponseWriter, req *http.Request) {
+		if req.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		body, err := io.ReadAll(req.Body)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("read body: %v", err), http.StatusBadRequest)
+			return
+		}
+		if err := verifyIssueWebhookRequest(provider, body, req); err != nil {
+			http.Error(w, err.Error(), http.StatusUnauthorized)
+			return
+		}
+		opts := issueWebhookOptions()
+		opts.Provider = provider
+		task, err := taskpkg.FactoryTaskFromIssueWebhook(body, opts)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		data, err := taskpkg.FactoryTaskYAML(task)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if webhookServeOptions.apply {
+			if err := runKubectlWithInput(data, "apply", "-f", "-"); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+		}
+		fmt.Fprintf(cmd.OutOrStdout(), "--- WEBHOOK: %s issue %s -> FactoryTask %s/%s\n", provider, task.Spec.Trigger.ID, namespaceForTask(task), task.Metadata.Name)
+		if webhookServeOptions.responseYAML {
+			w.Header().Set("Content-Type", "application/yaml")
+			_, _ = w.Write(data)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"task":"%s","namespace":"%s","applied":%t}`+"\n", task.Metadata.Name, namespaceForTask(task), webhookServeOptions.apply)
+	}
+}
+
+func verifyIssueWebhookRequest(provider string, body []byte, req *http.Request) error {
+	switch provider {
+	case taskpkg.ProviderGitHub:
+		return taskpkg.VerifyGitHubWebhookSignature(webhookServeOptions.secret, body, req.Header.Get("X-Hub-Signature-256"))
+	case taskpkg.ProviderGitLab:
+		return taskpkg.VerifyGitLabWebhookToken(webhookServeOptions.secret, req.Header.Get("X-Gitlab-Token"))
+	default:
+		return fmt.Errorf("unsupported webhook provider %q", provider)
+	}
 }
 
 func patchTaskStatus(namespace, name string, opts taskpkg.StatusPatchOptions) error {

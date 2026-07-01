@@ -1,0 +1,379 @@
+// Copyright 2026 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package task
+
+import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/url"
+	"strconv"
+	"strings"
+
+	"gopkg.in/yaml.v2"
+)
+
+const (
+	defaultIssueAgentName       = "builder"
+	defaultIssueSandboxTemplate = "go-dev"
+)
+
+// IssueWebhookOptions configures how issue webhooks become FactoryTasks.
+type IssueWebhookOptions struct {
+	Provider           string
+	Namespace          string
+	AgentName          string
+	PromptRef          string
+	SandboxTemplateRef string
+	ContainerName      string
+	ReportingMode      string
+	Commands           []string
+}
+
+// IssueWebhookEvent is the provider-neutral issue data extracted from a webhook.
+type IssueWebhookEvent struct {
+	Provider       string
+	Action         string
+	IssueID        string
+	IssueNumber    int
+	IssueTitle     string
+	IssueBody      string
+	IssueURL       string
+	Actor          string
+	Repository     string
+	RepositoryHost string
+	DefaultBranch  string
+	CloneURL       string
+}
+
+// FactoryTaskFromIssueWebhook converts a GitHub or GitLab issue webhook payload into a FactoryTask.
+func FactoryTaskFromIssueWebhook(payload []byte, opts IssueWebhookOptions) (*FactoryTask, error) {
+	event, err := ParseIssueWebhook(payload, opts.Provider)
+	if err != nil {
+		return nil, err
+	}
+	if event.Action != "" && !isIssueActionSupported(event.Action) {
+		return nil, fmt.Errorf("unsupported issue action %q", event.Action)
+	}
+
+	agentName := opts.AgentName
+	if agentName == "" {
+		agentName = defaultIssueAgentName
+	}
+	sandboxTemplate := opts.SandboxTemplateRef
+	if sandboxTemplate == "" {
+		sandboxTemplate = defaultIssueSandboxTemplate
+	}
+	reportingMode := opts.ReportingMode
+	if reportingMode == "" {
+		reportingMode = "comment"
+	}
+	branch := event.DefaultBranch
+	if branch == "" {
+		branch = "main"
+	}
+
+	task := &FactoryTask{
+		APIVersion: APIVersion,
+		Kind:       Kind,
+		Metadata: ObjectMeta{
+			Name:      dnsName(fmt.Sprintf("%s-%s-%d", event.Provider, event.Repository, event.IssueNumber)),
+			Namespace: opts.Namespace,
+			Labels: map[string]string{
+				"factory.ai.gke.io/provider": event.Provider,
+				"factory.ai.gke.io/trigger":  "issue",
+			},
+		},
+		Spec: FactoryTaskSpec{
+			Source: SourceSpec{
+				Provider:   event.Provider,
+				Host:       event.RepositoryHost,
+				Repository: event.Repository,
+				BaseRef:    branch,
+				CloneURL:   event.CloneURL,
+			},
+			Trigger: TriggerSpec{
+				Type:  "issue",
+				ID:    event.IssueID,
+				URL:   event.IssueURL,
+				Actor: event.Actor,
+			},
+			Agent: AgentSpec{
+				Name:      agentName,
+				PromptRef: opts.PromptRef,
+			},
+			Sandbox: SandboxSpec{
+				TemplateRef:   sandboxTemplate,
+				ContainerName: opts.ContainerName,
+			},
+			Work: WorkSpec{
+				Instructions: issueInstructions(event),
+				Commands:     opts.Commands,
+			},
+			Reporting: ReportingSpec{
+				Provider:  event.Provider,
+				Mode:      reportingMode,
+				TargetURL: event.IssueURL,
+			},
+		},
+	}
+	if err := task.Validate(); err != nil {
+		return nil, err
+	}
+	return task, nil
+}
+
+// ParseIssueWebhook extracts provider-neutral issue fields from a webhook payload.
+func ParseIssueWebhook(payload []byte, provider string) (*IssueWebhookEvent, error) {
+	switch provider {
+	case ProviderGitHub:
+		return parseGitHubIssueWebhook(payload)
+	case ProviderGitLab:
+		return parseGitLabIssueWebhook(payload)
+	case "":
+		return nil, errors.New("webhook provider is required")
+	default:
+		return nil, fmt.Errorf("unsupported webhook provider %q", provider)
+	}
+}
+
+// FactoryTaskYAML renders a FactoryTask as YAML.
+func FactoryTaskYAML(task *FactoryTask) ([]byte, error) {
+	data, err := yaml.Marshal(task)
+	if err != nil {
+		return nil, fmt.Errorf("marshal FactoryTask: %w", err)
+	}
+	return data, nil
+}
+
+// VerifyGitHubWebhookSignature verifies an X-Hub-Signature-256 header.
+func VerifyGitHubWebhookSignature(secret string, body []byte, signature string) error {
+	if secret == "" {
+		return nil
+	}
+	const prefix = "sha256="
+	if !strings.HasPrefix(signature, prefix) {
+		return errors.New("missing GitHub X-Hub-Signature-256 header")
+	}
+	got, err := hex.DecodeString(strings.TrimPrefix(signature, prefix))
+	if err != nil {
+		return fmt.Errorf("decode GitHub signature: %w", err)
+	}
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write(body)
+	want := mac.Sum(nil)
+	if !hmac.Equal(got, want) {
+		return errors.New("GitHub webhook signature mismatch")
+	}
+	return nil
+}
+
+// VerifyGitLabWebhookToken verifies an X-Gitlab-Token header.
+func VerifyGitLabWebhookToken(secret string, token string) error {
+	if secret == "" {
+		return nil
+	}
+	if subtle.ConstantTimeCompare([]byte(secret), []byte(token)) != 1 {
+		return errors.New("GitLab webhook token mismatch")
+	}
+	return nil
+}
+
+type githubIssueWebhook struct {
+	Action     string `json:"action"`
+	Issue      githubIssue
+	Repository githubRepository
+	Sender     githubUser
+}
+
+type githubIssue struct {
+	Number  int        `json:"number"`
+	Title   string     `json:"title"`
+	Body    string     `json:"body"`
+	HTMLURL string     `json:"html_url"`
+	User    githubUser `json:"user"`
+}
+
+type githubRepository struct {
+	FullName      string `json:"full_name"`
+	HTMLURL       string `json:"html_url"`
+	CloneURL      string `json:"clone_url"`
+	DefaultBranch string `json:"default_branch"`
+}
+
+type githubUser struct {
+	Login string `json:"login"`
+}
+
+func parseGitHubIssueWebhook(payload []byte) (*IssueWebhookEvent, error) {
+	var raw githubIssueWebhook
+	if err := json.Unmarshal(payload, &raw); err != nil {
+		return nil, fmt.Errorf("decode GitHub issue webhook: %w", err)
+	}
+	if raw.Issue.Number <= 0 {
+		return nil, errors.New("GitHub issue webhook missing issue.number")
+	}
+	if raw.Repository.FullName == "" {
+		return nil, errors.New("GitHub issue webhook missing repository.full_name")
+	}
+	actor := raw.Sender.Login
+	if actor == "" {
+		actor = raw.Issue.User.Login
+	}
+	return &IssueWebhookEvent{
+		Provider:       ProviderGitHub,
+		Action:         raw.Action,
+		IssueID:        strconv.Itoa(raw.Issue.Number),
+		IssueNumber:    raw.Issue.Number,
+		IssueTitle:     raw.Issue.Title,
+		IssueBody:      raw.Issue.Body,
+		IssueURL:       raw.Issue.HTMLURL,
+		Actor:          actor,
+		Repository:     raw.Repository.FullName,
+		RepositoryHost: hostFromURL(raw.Repository.HTMLURL, "github.com"),
+		DefaultBranch:  raw.Repository.DefaultBranch,
+		CloneURL:       raw.Repository.CloneURL,
+	}, nil
+}
+
+type gitlabIssueWebhook struct {
+	ObjectKind       string                 `json:"object_kind"`
+	EventType        string                 `json:"event_type"`
+	User             gitlabUser             `json:"user"`
+	Project          gitlabProject          `json:"project"`
+	ObjectAttributes gitlabObjectAttributes `json:"object_attributes"`
+}
+
+type gitlabUser struct {
+	Username string `json:"username"`
+	Name     string `json:"name"`
+}
+
+type gitlabProject struct {
+	PathWithNamespace string `json:"path_with_namespace"`
+	WebURL            string `json:"web_url"`
+	DefaultBranch     string `json:"default_branch"`
+	GitHTTPURL        string `json:"git_http_url"`
+	HTTPURL           string `json:"http_url"`
+}
+
+type gitlabObjectAttributes struct {
+	IID         int    `json:"iid"`
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	URL         string `json:"url"`
+	Action      string `json:"action"`
+}
+
+func parseGitLabIssueWebhook(payload []byte) (*IssueWebhookEvent, error) {
+	var raw gitlabIssueWebhook
+	if err := json.Unmarshal(payload, &raw); err != nil {
+		return nil, fmt.Errorf("decode GitLab issue webhook: %w", err)
+	}
+	if raw.ObjectKind != "" && raw.ObjectKind != "issue" {
+		return nil, fmt.Errorf("GitLab object_kind must be issue, got %q", raw.ObjectKind)
+	}
+	if raw.ObjectAttributes.IID <= 0 {
+		return nil, errors.New("GitLab issue webhook missing object_attributes.iid")
+	}
+	if raw.Project.PathWithNamespace == "" {
+		return nil, errors.New("GitLab issue webhook missing project.path_with_namespace")
+	}
+	actor := raw.User.Username
+	if actor == "" {
+		actor = raw.User.Name
+	}
+	cloneURL := raw.Project.GitHTTPURL
+	if cloneURL == "" {
+		cloneURL = raw.Project.HTTPURL
+	}
+	return &IssueWebhookEvent{
+		Provider:       ProviderGitLab,
+		Action:         raw.ObjectAttributes.Action,
+		IssueID:        strconv.Itoa(raw.ObjectAttributes.IID),
+		IssueNumber:    raw.ObjectAttributes.IID,
+		IssueTitle:     raw.ObjectAttributes.Title,
+		IssueBody:      raw.ObjectAttributes.Description,
+		IssueURL:       raw.ObjectAttributes.URL,
+		Actor:          actor,
+		Repository:     raw.Project.PathWithNamespace,
+		RepositoryHost: hostFromURL(raw.Project.WebURL, ""),
+		DefaultBranch:  raw.Project.DefaultBranch,
+		CloneURL:       cloneURL,
+	}, nil
+}
+
+func issueInstructions(event *IssueWebhookEvent) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Work on %s issue #%d: %s\n\n", event.Provider, event.IssueNumber, strings.TrimSpace(event.IssueTitle))
+	if strings.TrimSpace(event.IssueBody) != "" {
+		b.WriteString(strings.TrimSpace(event.IssueBody))
+		b.WriteString("\n\n")
+	}
+	if event.IssueURL != "" {
+		fmt.Fprintf(&b, "Issue URL: %s", event.IssueURL)
+	}
+	return strings.TrimSpace(b.String())
+}
+
+func isIssueActionSupported(action string) bool {
+	switch action {
+	case "open", "opened", "reopen", "reopened", "update", "updated", "labeled":
+		return true
+	default:
+		return false
+	}
+}
+
+func hostFromURL(rawURL, fallback string) string {
+	parsed, err := url.Parse(rawURL)
+	if err != nil || parsed.Hostname() == "" {
+		return fallback
+	}
+	return parsed.Hostname()
+}
+
+func dnsName(value string) string {
+	value = strings.ToLower(value)
+	var b strings.Builder
+	lastDash := false
+	for _, r := range value {
+		valid := (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9')
+		if valid {
+			b.WriteRune(r)
+			lastDash = false
+			continue
+		}
+		if !lastDash {
+			b.WriteByte('-')
+			lastDash = true
+		}
+	}
+	out := strings.Trim(b.String(), "-")
+	if out == "" {
+		return "factory-task"
+	}
+	if len(out) > 63 {
+		out = strings.Trim(out[:63], "-")
+	}
+	if out == "" {
+		return "factory-task"
+	}
+	return out
+}
