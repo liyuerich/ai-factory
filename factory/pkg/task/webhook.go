@@ -44,6 +44,9 @@ type IssueWebhookOptions struct {
 	ContainerName      string
 	ReportingMode      string
 	Commands           []string
+	TriggerActions     []string
+	RequiredLabels     []string
+	Repositories       []string
 }
 
 // IssueWebhookEvent is the provider-neutral issue data extracted from a webhook.
@@ -60,6 +63,16 @@ type IssueWebhookEvent struct {
 	RepositoryHost string
 	DefaultBranch  string
 	CloneURL       string
+	Labels         []string
+}
+
+// IgnoredIssueWebhookError reports a valid issue webhook that did not match trigger rules.
+type IgnoredIssueWebhookError struct {
+	Reason string
+}
+
+func (e *IgnoredIssueWebhookError) Error() string {
+	return e.Reason
 }
 
 // FactoryTaskFromIssueWebhook converts a GitHub or GitLab issue webhook payload into a FactoryTask.
@@ -68,8 +81,8 @@ func FactoryTaskFromIssueWebhook(payload []byte, opts IssueWebhookOptions) (*Fac
 	if err != nil {
 		return nil, err
 	}
-	if event.Action != "" && !isIssueActionSupported(event.Action) {
-		return nil, fmt.Errorf("unsupported issue action %q", event.Action)
+	if ok, reason := ShouldTriggerIssue(event, opts); !ok {
+		return nil, &IgnoredIssueWebhookError{Reason: reason}
 	}
 
 	agentName := opts.AgentName
@@ -139,6 +152,20 @@ func FactoryTaskFromIssueWebhook(payload []byte, opts IssueWebhookOptions) (*Fac
 	return task, nil
 }
 
+// ShouldTriggerIssue evaluates whether a parsed issue event should create a FactoryTask.
+func ShouldTriggerIssue(event *IssueWebhookEvent, opts IssueWebhookOptions) (bool, string) {
+	if event.Action != "" && !matchesAny(event.Action, triggerActions(opts.TriggerActions)) {
+		return false, fmt.Sprintf("ignored issue action %q", event.Action)
+	}
+	if len(opts.Repositories) > 0 && !matchesAny(event.Repository, opts.Repositories) {
+		return false, fmt.Sprintf("ignored repository %q", event.Repository)
+	}
+	if len(opts.RequiredLabels) > 0 && !hasAnyLabel(event.Labels, opts.RequiredLabels) {
+		return false, fmt.Sprintf("ignored issue without required label %q", strings.Join(opts.RequiredLabels, ","))
+	}
+	return true, ""
+}
+
 // ParseIssueWebhook extracts provider-neutral issue fields from a webhook payload.
 func ParseIssueWebhook(payload []byte, provider string) (*IssueWebhookEvent, error) {
 	switch provider {
@@ -200,14 +227,16 @@ type githubIssueWebhook struct {
 	Issue      githubIssue
 	Repository githubRepository
 	Sender     githubUser
+	Label      githubLabel `json:"label"`
 }
 
 type githubIssue struct {
-	Number  int        `json:"number"`
-	Title   string     `json:"title"`
-	Body    string     `json:"body"`
-	HTMLURL string     `json:"html_url"`
-	User    githubUser `json:"user"`
+	Number  int           `json:"number"`
+	Title   string        `json:"title"`
+	Body    string        `json:"body"`
+	HTMLURL string        `json:"html_url"`
+	User    githubUser    `json:"user"`
+	Labels  []githubLabel `json:"labels"`
 }
 
 type githubRepository struct {
@@ -219,6 +248,10 @@ type githubRepository struct {
 
 type githubUser struct {
 	Login string `json:"login"`
+}
+
+type githubLabel struct {
+	Name string `json:"name"`
 }
 
 func parseGitHubIssueWebhook(payload []byte) (*IssueWebhookEvent, error) {
@@ -249,6 +282,7 @@ func parseGitHubIssueWebhook(payload []byte) (*IssueWebhookEvent, error) {
 		RepositoryHost: hostFromURL(raw.Repository.HTMLURL, "github.com"),
 		DefaultBranch:  raw.Repository.DefaultBranch,
 		CloneURL:       raw.Repository.CloneURL,
+		Labels:         githubLabels(raw),
 	}, nil
 }
 
@@ -258,6 +292,7 @@ type gitlabIssueWebhook struct {
 	User             gitlabUser             `json:"user"`
 	Project          gitlabProject          `json:"project"`
 	ObjectAttributes gitlabObjectAttributes `json:"object_attributes"`
+	Labels           []gitlabLabel          `json:"labels"`
 }
 
 type gitlabUser struct {
@@ -274,11 +309,16 @@ type gitlabProject struct {
 }
 
 type gitlabObjectAttributes struct {
-	IID         int    `json:"iid"`
-	Title       string `json:"title"`
-	Description string `json:"description"`
-	URL         string `json:"url"`
-	Action      string `json:"action"`
+	IID         int           `json:"iid"`
+	Title       string        `json:"title"`
+	Description string        `json:"description"`
+	URL         string        `json:"url"`
+	Action      string        `json:"action"`
+	Labels      []gitlabLabel `json:"labels"`
+}
+
+type gitlabLabel struct {
+	Title string `json:"title"`
 }
 
 func parseGitLabIssueWebhook(payload []byte) (*IssueWebhookEvent, error) {
@@ -316,6 +356,7 @@ func parseGitLabIssueWebhook(payload []byte) (*IssueWebhookEvent, error) {
 		RepositoryHost: hostFromURL(raw.Project.WebURL, ""),
 		DefaultBranch:  raw.Project.DefaultBranch,
 		CloneURL:       cloneURL,
+		Labels:         gitlabLabels(raw),
 	}, nil
 }
 
@@ -332,13 +373,58 @@ func issueInstructions(event *IssueWebhookEvent) string {
 	return strings.TrimSpace(b.String())
 }
 
-func isIssueActionSupported(action string) bool {
-	switch action {
-	case "open", "opened", "reopen", "reopened", "update", "updated", "labeled":
-		return true
-	default:
-		return false
+func triggerActions(actions []string) []string {
+	if len(actions) > 0 {
+		return actions
 	}
+	return []string{"open", "opened", "reopen", "reopened", "labeled"}
+}
+
+func matchesAny(value string, allowed []string) bool {
+	value = strings.ToLower(strings.TrimSpace(value))
+	for _, item := range allowed {
+		if value == strings.ToLower(strings.TrimSpace(item)) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasAnyLabel(labels []string, required []string) bool {
+	for _, label := range labels {
+		if matchesAny(label, required) {
+			return true
+		}
+	}
+	return false
+}
+
+func githubLabels(raw githubIssueWebhook) []string {
+	labels := make([]string, 0, len(raw.Issue.Labels)+1)
+	for _, label := range raw.Issue.Labels {
+		if strings.TrimSpace(label.Name) != "" {
+			labels = append(labels, label.Name)
+		}
+	}
+	if strings.TrimSpace(raw.Label.Name) != "" {
+		labels = append(labels, raw.Label.Name)
+	}
+	return labels
+}
+
+func gitlabLabels(raw gitlabIssueWebhook) []string {
+	labels := make([]string, 0, len(raw.Labels)+len(raw.ObjectAttributes.Labels))
+	for _, label := range raw.Labels {
+		if strings.TrimSpace(label.Title) != "" {
+			labels = append(labels, label.Title)
+		}
+	}
+	for _, label := range raw.ObjectAttributes.Labels {
+		if strings.TrimSpace(label.Title) != "" {
+			labels = append(labels, label.Title)
+		}
+	}
+	return labels
 }
 
 func hostFromURL(rawURL, fallback string) string {

@@ -7,7 +7,12 @@
     "html_url": "https://github.com/liyuerich/ai-factory/issues/42",
     "user": {
       "login": "yueli"
-    }
+    },
+    "labels": [
+      {
+        "name": "ai-factory"
+      }
+    ]
   },
   "repository": {
     "full_name": "liyuerich/ai-factory",

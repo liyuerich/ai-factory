@@ -15,10 +15,15 @@
 package task
 
 import (
+	"bytes"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	taskpkg "github.com/ai-on-gke/ai-factory/factory/pkg/task"
+	"github.com/spf13/cobra"
 )
 
 func TestShouldReconcile(t *testing.T) {
@@ -131,5 +136,63 @@ func TestBuildReportMessage(t *testing.T) {
 	want := "FactoryTask `factory-system/validate-ai-factory` Succeeded\n\ndone"
 	if got != want {
 		t.Fatalf("buildReportMessage() = %q, want %q", got, want)
+	}
+}
+
+func TestIssueWebhookHandlerIgnoresMissingRequiredLabel(t *testing.T) {
+	previousOptions := webhookOptions
+	previousServeOptions := webhookServeOptions
+	defer func() {
+		webhookOptions = previousOptions
+		webhookServeOptions = previousServeOptions
+	}()
+
+	webhookOptions = struct {
+		provider           string
+		namespace          string
+		agent              string
+		promptRef          string
+		sandboxTemplateRef string
+		containerName      string
+		reportingMode      string
+		command            []string
+		triggerAction      []string
+		requireLabel       []string
+		repository         []string
+	}{
+		namespace:          "factory-system",
+		agent:              "builder",
+		sandboxTemplateRef: "go-dev",
+		requireLabel:       []string{"ai-factory"},
+	}
+	webhookServeOptions.apply = false
+
+	payload := []byte(`{
+	  "action": "opened",
+	  "issue": {
+	    "number": 42,
+	    "title": "Missing label",
+	    "body": "Do not run.",
+	    "html_url": "https://github.com/liyuerich/ai-factory/issues/42",
+	    "user": {"login": "yueli"}
+	  },
+	  "repository": {
+	    "full_name": "liyuerich/ai-factory",
+	    "html_url": "https://github.com/liyuerich/ai-factory",
+	    "clone_url": "https://github.com/liyuerich/ai-factory.git",
+	    "default_branch": "main"
+	  },
+	  "sender": {"login": "liyuerich"}
+	}`)
+	req := httptest.NewRequest(http.MethodPost, "/webhook/github", bytes.NewReader(payload))
+	resp := httptest.NewRecorder()
+
+	issueWebhookHandler(&cobra.Command{}, taskpkg.ProviderGitHub)(resp, req)
+
+	if resp.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want %d; body=%s", resp.Code, http.StatusAccepted, resp.Body.String())
+	}
+	if !strings.Contains(resp.Body.String(), `"ignored":true`) {
+		t.Fatalf("body = %s, want ignored response", resp.Body.String())
 	}
 }

@@ -176,6 +176,9 @@ var webhookOptions struct {
 	containerName      string
 	reportingMode      string
 	command            []string
+	triggerAction      []string
+	requireLabel       []string
+	repository         []string
 }
 
 var webhookRenderCmd = &cobra.Command{
@@ -189,6 +192,10 @@ var webhookRenderCmd = &cobra.Command{
 		}
 		task, err := taskpkg.FactoryTaskFromIssueWebhook(payload, issueWebhookOptions())
 		if err != nil {
+			if ignored, ok := err.(*taskpkg.IgnoredIssueWebhookError); ok {
+				fmt.Fprintf(cmd.OutOrStdout(), "ignored=true reason=%q\n", ignored.Reason)
+				return nil
+			}
 			return err
 		}
 		data, err := taskpkg.FactoryTaskYAML(task)
@@ -357,6 +364,9 @@ func init() {
 	webhookCmd.PersistentFlags().StringVar(&webhookOptions.containerName, "container", "", "sandbox container name")
 	webhookCmd.PersistentFlags().StringVar(&webhookOptions.reportingMode, "reporting-mode", "comment", "reporting mode for generated FactoryTasks")
 	webhookCmd.PersistentFlags().StringArrayVar(&webhookOptions.command, "command", nil, "command to run in the generated FactoryTask; can be repeated")
+	webhookCmd.PersistentFlags().StringArrayVar(&webhookOptions.triggerAction, "trigger-action", nil, "issue action that can trigger a FactoryTask; can be repeated")
+	webhookCmd.PersistentFlags().StringArrayVar(&webhookOptions.requireLabel, "require-label", nil, "issue label required to trigger a FactoryTask; can be repeated")
+	webhookCmd.PersistentFlags().StringArrayVar(&webhookOptions.repository, "repository", nil, "repository allowed to trigger FactoryTasks; can be repeated")
 	webhookRenderCmd.Flags().StringVar(&webhookOptions.provider, "provider", taskpkg.ProviderGitHub, "webhook provider: github or gitlab")
 	webhookServeCmd.Flags().StringVar(&webhookServeOptions.addr, "addr", ":8080", "listen address")
 	webhookServeCmd.Flags().StringVar(&webhookServeOptions.secret, "secret", "", "webhook secret for GitHub signatures or GitLab tokens")
@@ -416,6 +426,9 @@ func issueWebhookOptions() taskpkg.IssueWebhookOptions {
 		ContainerName:      webhookOptions.containerName,
 		ReportingMode:      webhookOptions.reportingMode,
 		Commands:           webhookOptions.command,
+		TriggerActions:     webhookOptions.triggerAction,
+		RequiredLabels:     webhookOptions.requireLabel,
+		Repositories:       webhookOptions.repository,
 	}
 }
 
@@ -438,6 +451,13 @@ func issueWebhookHandler(cmd *cobra.Command, provider string) http.HandlerFunc {
 		opts.Provider = provider
 		task, err := taskpkg.FactoryTaskFromIssueWebhook(body, opts)
 		if err != nil {
+			if ignored, ok := err.(*taskpkg.IgnoredIssueWebhookError); ok {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusAccepted)
+				fmt.Fprintf(w, `{"ignored":true,"reason":%q}`+"\n", ignored.Reason)
+				fmt.Fprintf(cmd.OutOrStdout(), "--- WEBHOOK IGNORED: %s %s\n", provider, ignored.Reason)
+				return
+			}
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
@@ -459,7 +479,7 @@ func issueWebhookHandler(cmd *cobra.Command, provider string) http.HandlerFunc {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintf(w, `{"task":"%s","namespace":"%s","applied":%t}`+"\n", task.Metadata.Name, namespaceForTask(task), webhookServeOptions.apply)
+		fmt.Fprintf(w, `{"triggered":true,"task":"%s","namespace":"%s","applied":%t}`+"\n", task.Metadata.Name, namespaceForTask(task), webhookServeOptions.apply)
 	}
 }
 

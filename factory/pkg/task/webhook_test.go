@@ -29,6 +29,7 @@ func TestFactoryTaskFromGitHubIssueWebhook(t *testing.T) {
 		AgentName:          "builder",
 		SandboxTemplateRef: "go-dev",
 		Commands:           []string{"go test ./..."},
+		RequiredLabels:     []string{"ai-factory"},
 	})
 	if err != nil {
 		t.Fatalf("FactoryTaskFromIssueWebhook() error = %v", err)
@@ -62,11 +63,42 @@ func TestFactoryTaskFromGitHubIssueWebhook(t *testing.T) {
 	}
 }
 
+func TestFactoryTaskFromGitHubIssueWebhookIgnoredWithoutRequiredLabel(t *testing.T) {
+	_, err := FactoryTaskFromIssueWebhook([]byte(githubIssuePayload), IssueWebhookOptions{
+		Provider:           ProviderGitHub,
+		AgentName:          "builder",
+		SandboxTemplateRef: "go-dev",
+		RequiredLabels:     []string{"needs-ai"},
+	})
+	if err == nil {
+		t.Fatal("FactoryTaskFromIssueWebhook() error = nil, want ignored error")
+	}
+	if _, ok := err.(*IgnoredIssueWebhookError); !ok {
+		t.Fatalf("error type = %T, want *IgnoredIssueWebhookError", err)
+	}
+}
+
+func TestFactoryTaskFromIssueWebhookIgnoredForUnsupportedAction(t *testing.T) {
+	_, err := FactoryTaskFromIssueWebhook([]byte(githubClosedIssuePayload), IssueWebhookOptions{
+		Provider:           ProviderGitHub,
+		AgentName:          "builder",
+		SandboxTemplateRef: "go-dev",
+		RequiredLabels:     []string{"ai-factory"},
+	})
+	if err == nil {
+		t.Fatal("FactoryTaskFromIssueWebhook() error = nil, want ignored error")
+	}
+	if !strings.Contains(err.Error(), "closed") {
+		t.Fatalf("error = %v, want closed action reason", err)
+	}
+}
+
 func TestFactoryTaskFromGitLabIssueWebhook(t *testing.T) {
 	task, err := FactoryTaskFromIssueWebhook([]byte(gitlabIssuePayload), IssueWebhookOptions{
 		Provider:           ProviderGitLab,
 		AgentName:          "builder",
 		SandboxTemplateRef: "go-dev",
+		RequiredLabels:     []string{"ai-factory"},
 	})
 	if err != nil {
 		t.Fatalf("FactoryTaskFromIssueWebhook() error = %v", err)
@@ -85,6 +117,19 @@ func TestFactoryTaskFromGitLabIssueWebhook(t *testing.T) {
 	}
 	if task.Spec.Reporting.Provider != ProviderGitLab {
 		t.Fatalf("reporting.provider = %q", task.Spec.Reporting.Provider)
+	}
+}
+
+func TestShouldTriggerIssueRepositoryFilter(t *testing.T) {
+	event, err := ParseIssueWebhook([]byte(gitlabIssuePayload), ProviderGitLab)
+	if err != nil {
+		t.Fatalf("ParseIssueWebhook() error = %v", err)
+	}
+	if ok, reason := ShouldTriggerIssue(event, IssueWebhookOptions{Repositories: []string{"platform/ai/ai-factory"}}); !ok {
+		t.Fatalf("ShouldTriggerIssue() = false, reason %q", reason)
+	}
+	if ok, reason := ShouldTriggerIssue(event, IssueWebhookOptions{Repositories: []string{"other/repo"}}); ok || !strings.Contains(reason, "repository") {
+		t.Fatalf("ShouldTriggerIssue() = %v, reason %q; want repository ignore", ok, reason)
 	}
 }
 
@@ -137,7 +182,27 @@ const githubIssuePayload = `{
     "title": "Add webhook support",
     "body": "Convert issues into FactoryTasks.",
     "html_url": "https://github.com/liyuerich/ai-factory/issues/42",
-    "user": {"login": "yueli"}
+    "user": {"login": "yueli"},
+    "labels": [{"name": "ai-factory"}]
+  },
+  "repository": {
+    "full_name": "liyuerich/ai-factory",
+    "html_url": "https://github.com/liyuerich/ai-factory",
+    "clone_url": "https://github.com/liyuerich/ai-factory.git",
+    "default_branch": "main"
+  },
+  "sender": {"login": "liyuerich"}
+}`
+
+const githubClosedIssuePayload = `{
+  "action": "closed",
+  "issue": {
+    "number": 42,
+    "title": "Add webhook support",
+    "body": "Convert issues into FactoryTasks.",
+    "html_url": "https://github.com/liyuerich/ai-factory/issues/42",
+    "user": {"login": "yueli"},
+    "labels": [{"name": "ai-factory"}]
   },
   "repository": {
     "full_name": "liyuerich/ai-factory",
@@ -163,6 +228,7 @@ const gitlabIssuePayload = `{
     "title": "Run agent task",
     "description": "Please validate this project.",
     "url": "https://gitlab.example.com/platform/ai/ai-factory/-/issues/7",
-    "action": "open"
+    "action": "open",
+    "labels": [{"title": "ai-factory"}]
   }
 }`
