@@ -1,0 +1,21 @@
+{
+  "action": "opened",
+  "issue": {
+    "number": 42,
+    "title": "Validate ai-factory from an issue",
+    "body": "Run the factory-runtime-proxy spec validation in a sandbox.",
+    "html_url": "https://github.com/liyuerich/ai-factory/issues/42",
+    "user": {
+      "login": "yueli"
+    }
+  },
+  "repository": {
+    "full_name": "liyuerich/ai-factory",
+    "html_url": "https://github.com/liyuerich/ai-factory",
+    "clone_url": "https://github.com/liyuerich/ai-factory.git",
+    "default_branch": "main"
+  },
+  "sender": {
+    "login": "liyuerich"
+  }
+}
