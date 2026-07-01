@@ -16,6 +16,11 @@
     "title": "Validate ai-factory from a GitLab issue",
     "description": "Run the factory-runtime-proxy spec validation in a sandbox.",
     "url": "https://gitlab.example.com/platform/ai/ai-factory/-/issues/7",
-    "action": "open"
+    "action": "open",
+    "labels": [
+      {
+        "title": "ai-factory"
+      }
+    ]
   }
 }
