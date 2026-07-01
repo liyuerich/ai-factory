@@ -17,7 +17,9 @@ package task
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
@@ -124,6 +126,14 @@ var runOnceOptions struct {
 	timeout time.Duration
 }
 
+var watchOptions struct {
+	namespace   string
+	interval    time.Duration
+	timeout     time.Duration
+	once        bool
+	retryFailed bool
+}
+
 var patchStatusOptions struct {
 	namespace        string
 	phase            string
@@ -144,105 +154,38 @@ var runOnceCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		output, err := taskpkg.Reconcile(task)
-		if err != nil {
-			return err
-		}
-		manifest, err := output.SandboxClaimYAML()
-		if err != nil {
-			return err
-		}
+		return executeTask(cmd.OutOrStdout(), task, taskData, true, runOnceOptions.timeout, "run-once")
+	},
+}
 
-		namespace := output.SandboxClaim.Metadata.Namespace
-		claim := output.SandboxClaim.Metadata.Name
-		if err := runKubectlWithInput(taskData, "apply", "-f", "-"); err != nil {
-			return err
+var watchCmd = &cobra.Command{
+	Use:   "watch",
+	Short: "Continuously reconcile pending FactoryTasks with kubectl",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		namespace := watchOptions.namespace
+		if namespace == "" {
+			namespace = "default"
 		}
-		if err := patchTaskStatus(namespace, task.Metadata.Name, taskpkg.StatusPatchOptions{
-			Phase:            taskpkg.PhasePending,
-			Reason:           "TaskAccepted",
-			Message:          "FactoryTask accepted by run-once controller",
-			SandboxClaimName: claim,
-		}); err != nil {
-			return err
-		}
-		if err := runKubectlWithInput(manifest, "apply", "-f", "-"); err != nil {
-			_ = patchTaskStatus(namespace, task.Metadata.Name, taskpkg.StatusPatchOptions{
-				Phase:   taskpkg.PhaseFailed,
-				Reason:  "SandboxClaimApplyFailed",
-				Message: err.Error(),
-			})
-			return err
-		}
-		if err := patchTaskStatus(namespace, task.Metadata.Name, taskpkg.StatusPatchOptions{
-			Phase:            taskpkg.PhaseClaimCreated,
-			Reason:           "SandboxClaimCreated",
-			Message:          "SandboxClaim created",
-			SandboxClaimName: claim,
-		}); err != nil {
-			return err
-		}
-		if err := runKubectl(nil, "wait", "sandboxclaim", claim, "-n", namespace, "--for=condition=Ready", "--timeout="+runOnceOptions.timeout.String()); err != nil {
-			_ = patchTaskStatus(namespace, task.Metadata.Name, taskpkg.StatusPatchOptions{
-				Phase:            taskpkg.PhaseFailed,
-				Reason:           "SandboxClaimReadyTimeout",
-				Message:          err.Error(),
-				SandboxClaimName: claim,
-			})
-			return err
-		}
-
-		sandboxName, err := kubectlOutput("get", "sandboxclaim", claim, "-n", namespace, "-o", "jsonpath={.status.sandboxName}")
-		if err != nil {
-			return err
-		}
-		sandboxName = strings.TrimSpace(sandboxName)
-		if sandboxName == "" {
-			return fmt.Errorf("sandboxclaim %s/%s is ready but status.sandboxName is empty", namespace, claim)
-		}
-		if err := patchTaskStatus(namespace, task.Metadata.Name, taskpkg.StatusPatchOptions{
-			Phase:            taskpkg.PhaseSandboxReady,
-			Reason:           "SandboxReady",
-			Message:          "SandboxClaim is ready",
-			SandboxClaimName: claim,
-			SandboxName:      sandboxName,
-		}); err != nil {
-			return err
-		}
-		if err := patchTaskStatus(namespace, task.Metadata.Name, taskpkg.StatusPatchOptions{
-			Phase:            taskpkg.PhaseRunning,
-			Reason:           "RunOnceStarted",
-			Message:          "Executing generated plan",
-			SandboxClaimName: claim,
-			SandboxName:      sandboxName,
-		}); err != nil {
-			return err
-		}
-
-		for _, step := range output.Plan.Steps {
-			fmt.Fprintf(cmd.OutOrStdout(), "--- RUN: %s\n", step.Name)
-			if err := runKubectl(nil, append([]string{"exec", "-n", namespace, sandboxName, "-c", output.Plan.ContainerName, "--"}, step.Command...)...); err != nil {
-				_ = patchTaskStatus(namespace, task.Metadata.Name, taskpkg.StatusPatchOptions{
-					Phase:            taskpkg.PhaseFailed,
-					Reason:           "StepFailed",
-					Message:          fmt.Sprintf("%s: %v", step.Name, err),
-					SandboxClaimName: claim,
-					SandboxName:      sandboxName,
-				})
-				return fmt.Errorf("%s: %w", step.Name, err)
+		for {
+			tasks, err := listFactoryTasks(namespace)
+			if err != nil {
+				return err
 			}
+			for i := range tasks {
+				task := tasks[i]
+				if !shouldReconcile(task, watchOptions.retryFailed) {
+					continue
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "--- RECONCILE: %s/%s\n", namespaceForTask(&task), task.Metadata.Name)
+				if err := executeTask(cmd.OutOrStdout(), &task, nil, false, watchOptions.timeout, "watch-controller"); err != nil {
+					fmt.Fprintf(cmd.ErrOrStderr(), "FactoryTask %s/%s failed: %v\n", namespaceForTask(&task), task.Metadata.Name, err)
+				}
+			}
+			if watchOptions.once {
+				return nil
+			}
+			time.Sleep(watchOptions.interval)
 		}
-		if err := patchTaskStatus(namespace, task.Metadata.Name, taskpkg.StatusPatchOptions{
-			Phase:            taskpkg.PhaseSucceeded,
-			Reason:           "RunOnceSucceeded",
-			Message:          "FactoryTask completed successfully",
-			SandboxClaimName: claim,
-			SandboxName:      sandboxName,
-		}); err != nil {
-			return err
-		}
-		fmt.Fprintln(cmd.OutOrStdout(), "PASS")
-		return nil
 	},
 }
 
@@ -273,8 +216,14 @@ func init() {
 	Cmd.AddCommand(controllerCmd)
 	controllerCmd.AddCommand(manifestCmd)
 	controllerCmd.AddCommand(runOnceCmd)
+	controllerCmd.AddCommand(watchCmd)
 	controllerCmd.AddCommand(patchStatusCmd)
 	runOnceCmd.Flags().DurationVar(&runOnceOptions.timeout, "timeout", 5*time.Minute, "time to wait for the SandboxClaim to become Ready")
+	watchCmd.Flags().StringVarP(&watchOptions.namespace, "namespace", "n", "default", "FactoryTask namespace")
+	watchCmd.Flags().DurationVar(&watchOptions.interval, "interval", 15*time.Second, "time between FactoryTask list polls")
+	watchCmd.Flags().DurationVar(&watchOptions.timeout, "timeout", 5*time.Minute, "time to wait for each SandboxClaim to become Ready")
+	watchCmd.Flags().BoolVar(&watchOptions.once, "once", false, "list and reconcile once, then exit")
+	watchCmd.Flags().BoolVar(&watchOptions.retryFailed, "retry-failed", false, "reconcile FactoryTasks whose phase is Failed")
 	patchStatusCmd.Flags().StringVarP(&patchStatusOptions.namespace, "namespace", "n", "default", "FactoryTask namespace")
 	patchStatusCmd.Flags().StringVar(&patchStatusOptions.phase, "phase", taskpkg.PhasePending, "FactoryTask phase")
 	patchStatusCmd.Flags().StringVar(&patchStatusOptions.message, "message", "", "status message")
@@ -308,6 +257,144 @@ func patchTaskStatus(namespace, name string, opts taskpkg.StatusPatchOptions) er
 		return err
 	}
 	return runKubectl(nil, "patch", "factorytask", name, "-n", namespace, "--type=merge", "--subresource=status", "-p", string(patch))
+}
+
+func executeTask(out io.Writer, task *taskpkg.FactoryTask, taskData []byte, applyTask bool, timeout time.Duration, controllerName string) error {
+	output, err := taskpkg.Reconcile(task)
+	if err != nil {
+		return err
+	}
+	manifest, err := output.SandboxClaimYAML()
+	if err != nil {
+		return err
+	}
+
+	namespace := output.SandboxClaim.Metadata.Namespace
+	claim := output.SandboxClaim.Metadata.Name
+	if applyTask {
+		if err := runKubectlWithInput(taskData, "apply", "-f", "-"); err != nil {
+			return err
+		}
+	}
+	if err := patchTaskStatus(namespace, task.Metadata.Name, taskpkg.StatusPatchOptions{
+		Phase:            taskpkg.PhasePending,
+		Reason:           "TaskAccepted",
+		Message:          fmt.Sprintf("FactoryTask accepted by %s", controllerName),
+		SandboxClaimName: claim,
+	}); err != nil {
+		return err
+	}
+	if err := runKubectlWithInput(manifest, "apply", "-f", "-"); err != nil {
+		_ = patchTaskStatus(namespace, task.Metadata.Name, taskpkg.StatusPatchOptions{
+			Phase:   taskpkg.PhaseFailed,
+			Reason:  "SandboxClaimApplyFailed",
+			Message: err.Error(),
+		})
+		return err
+	}
+	if err := patchTaskStatus(namespace, task.Metadata.Name, taskpkg.StatusPatchOptions{
+		Phase:            taskpkg.PhaseClaimCreated,
+		Reason:           "SandboxClaimCreated",
+		Message:          "SandboxClaim created",
+		SandboxClaimName: claim,
+	}); err != nil {
+		return err
+	}
+	if err := runKubectl(nil, "wait", "sandboxclaim", claim, "-n", namespace, "--for=condition=Ready", "--timeout="+timeout.String()); err != nil {
+		_ = patchTaskStatus(namespace, task.Metadata.Name, taskpkg.StatusPatchOptions{
+			Phase:            taskpkg.PhaseFailed,
+			Reason:           "SandboxClaimReadyTimeout",
+			Message:          err.Error(),
+			SandboxClaimName: claim,
+		})
+		return err
+	}
+
+	sandboxName, err := kubectlOutput("get", "sandboxclaim", claim, "-n", namespace, "-o", "jsonpath={.status.sandboxName}")
+	if err != nil {
+		return err
+	}
+	sandboxName = strings.TrimSpace(sandboxName)
+	if sandboxName == "" {
+		return fmt.Errorf("sandboxclaim %s/%s is ready but status.sandboxName is empty", namespace, claim)
+	}
+	if err := patchTaskStatus(namespace, task.Metadata.Name, taskpkg.StatusPatchOptions{
+		Phase:            taskpkg.PhaseSandboxReady,
+		Reason:           "SandboxReady",
+		Message:          "SandboxClaim is ready",
+		SandboxClaimName: claim,
+		SandboxName:      sandboxName,
+	}); err != nil {
+		return err
+	}
+	if err := patchTaskStatus(namespace, task.Metadata.Name, taskpkg.StatusPatchOptions{
+		Phase:            taskpkg.PhaseRunning,
+		Reason:           "PlanStarted",
+		Message:          "Executing generated plan",
+		SandboxClaimName: claim,
+		SandboxName:      sandboxName,
+	}); err != nil {
+		return err
+	}
+
+	for _, step := range output.Plan.Steps {
+		fmt.Fprintf(out, "--- RUN: %s\n", step.Name)
+		if err := runKubectl(nil, append([]string{"exec", "-n", namespace, sandboxName, "-c", output.Plan.ContainerName, "--"}, step.Command...)...); err != nil {
+			_ = patchTaskStatus(namespace, task.Metadata.Name, taskpkg.StatusPatchOptions{
+				Phase:            taskpkg.PhaseFailed,
+				Reason:           "StepFailed",
+				Message:          fmt.Sprintf("%s: %v", step.Name, err),
+				SandboxClaimName: claim,
+				SandboxName:      sandboxName,
+			})
+			return fmt.Errorf("%s: %w", step.Name, err)
+		}
+	}
+	if err := patchTaskStatus(namespace, task.Metadata.Name, taskpkg.StatusPatchOptions{
+		Phase:            taskpkg.PhaseSucceeded,
+		Reason:           "PlanSucceeded",
+		Message:          "FactoryTask completed successfully",
+		SandboxClaimName: claim,
+		SandboxName:      sandboxName,
+	}); err != nil {
+		return err
+	}
+	fmt.Fprintln(out, "PASS")
+	return nil
+}
+
+type factoryTaskList struct {
+	Items []taskpkg.FactoryTask `json:"items"`
+}
+
+func listFactoryTasks(namespace string) ([]taskpkg.FactoryTask, error) {
+	out, err := kubectlOutput("get", "factorytasks", "-n", namespace, "-o", "json")
+	if err != nil {
+		return nil, err
+	}
+	var list factoryTaskList
+	if err := json.Unmarshal([]byte(out), &list); err != nil {
+		return nil, fmt.Errorf("decode FactoryTask list: %w", err)
+	}
+	return list.Items, nil
+}
+
+func shouldReconcile(task taskpkg.FactoryTask, retryFailed bool) bool {
+	switch task.Status.Phase {
+	case "", taskpkg.PhasePending, taskpkg.PhaseClaimCreated, taskpkg.PhaseSandboxReady:
+		return true
+	case taskpkg.PhaseFailed:
+		return retryFailed
+	default:
+		return false
+	}
+}
+
+func namespaceForTask(task *taskpkg.FactoryTask) string {
+	if task.Metadata.Namespace == "" {
+		return "default"
+	}
+	return task.Metadata.Namespace
 }
 
 func runKubectl(stdin []byte, args ...string) error {
