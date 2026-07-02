@@ -161,6 +161,55 @@ var reportCommentCmd = &cobra.Command{
 	},
 }
 
+var changeRequestCmd = &cobra.Command{
+	Use:   "change-request",
+	Short: "Manage FactoryTask pull requests and merge requests",
+	Long:  `Change request commands create provider-native pull requests or merge requests from FactoryTask changeRequest specs.`,
+	Run: func(cmd *cobra.Command, args []string) {
+		cmd.Help()
+	},
+}
+
+var changeRequestCreateOptions struct {
+	token   string
+	apiBase string
+	dryRun  bool
+}
+
+var changeRequestCreateCmd = &cobra.Command{
+	Use:   "create [file]",
+	Short: "Create a GitHub pull request or GitLab merge request for a FactoryTask",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		task, err := readTask(args[0])
+		if err != nil {
+			return err
+		}
+		opts := taskpkg.ChangeRequestOptions{
+			Token:   changeRequestCreateOptions.token,
+			APIBase: changeRequestCreateOptions.apiBase,
+		}
+		if changeRequestCreateOptions.dryRun {
+			if opts.Token == "" {
+				opts.Token = "dry-run-token"
+			}
+			req, err := taskpkg.BuildChangeRequest(task, opts)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "provider=%s method=%s url=%s\n", req.Provider, req.Method, req.URL)
+			fmt.Fprintf(cmd.OutOrStdout(), "body=%s\n", string(req.Body))
+			return nil
+		}
+		result, err := taskpkg.CreateChangeRequest(context.Background(), task, opts)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(cmd.OutOrStdout(), "--- PASS: change-request %s\n", result.URL)
+		return nil
+	},
+}
+
 var webhookCmd = &cobra.Command{
 	Use:   "webhook",
 	Short: "Convert issue webhooks into FactoryTasks",
@@ -252,17 +301,19 @@ var manifestCmd = &cobra.Command{
 }
 
 var runOnceOptions struct {
-	timeout time.Duration
-	report  bool
+	timeout             time.Duration
+	report              bool
+	createChangeRequest bool
 }
 
 var watchOptions struct {
-	namespace   string
-	interval    time.Duration
-	timeout     time.Duration
-	once        bool
-	retryFailed bool
-	report      bool
+	namespace           string
+	interval            time.Duration
+	timeout             time.Duration
+	once                bool
+	retryFailed         bool
+	report              bool
+	createChangeRequest bool
 }
 
 var patchStatusOptions struct {
@@ -345,9 +396,11 @@ func init() {
 	Cmd.AddCommand(validateCmd)
 	Cmd.AddCommand(planCmd)
 	Cmd.AddCommand(reportCmd)
+	Cmd.AddCommand(changeRequestCmd)
 	Cmd.AddCommand(webhookCmd)
 	Cmd.AddCommand(controllerCmd)
 	reportCmd.AddCommand(reportCommentCmd)
+	changeRequestCmd.AddCommand(changeRequestCreateCmd)
 	webhookCmd.AddCommand(webhookRenderCmd)
 	webhookCmd.AddCommand(webhookServeCmd)
 	controllerCmd.AddCommand(manifestCmd)
@@ -356,10 +409,14 @@ func init() {
 	controllerCmd.AddCommand(patchStatusCmd)
 	runOnceCmd.Flags().DurationVar(&runOnceOptions.timeout, "timeout", 5*time.Minute, "time to wait for the SandboxClaim to become Ready")
 	runOnceCmd.Flags().BoolVar(&runOnceOptions.report, "report", true, "write reporting.comment results when spec.reporting is configured")
+	runOnceCmd.Flags().BoolVar(&runOnceOptions.createChangeRequest, "create-change-request", true, "create PR/MR when spec.changeRequest is configured")
 	reportCommentCmd.Flags().StringVar(&reportCommentOptions.message, "message", "", "comment body to write")
 	reportCommentCmd.Flags().StringVar(&reportCommentOptions.token, "token", "", "provider API token; defaults to GITHUB_TOKEN or GITLAB_TOKEN")
 	reportCommentCmd.Flags().StringVar(&reportCommentOptions.apiBase, "api-base", "", "override provider API base URL")
 	reportCommentCmd.Flags().BoolVar(&reportCommentOptions.dryRun, "dry-run", false, "print the comment request without sending it")
+	changeRequestCreateCmd.Flags().StringVar(&changeRequestCreateOptions.token, "token", "", "provider API token; defaults to GITHUB_TOKEN or GITLAB_TOKEN")
+	changeRequestCreateCmd.Flags().StringVar(&changeRequestCreateOptions.apiBase, "api-base", "", "override provider API base URL")
+	changeRequestCreateCmd.Flags().BoolVar(&changeRequestCreateOptions.dryRun, "dry-run", false, "print the PR/MR request without sending it")
 	webhookCmd.PersistentFlags().StringVarP(&webhookOptions.namespace, "namespace", "n", "default", "FactoryTask namespace")
 	webhookCmd.PersistentFlags().StringVar(&webhookOptions.agent, "agent", "builder", "agent name for generated FactoryTasks")
 	webhookCmd.PersistentFlags().StringVar(&webhookOptions.promptRef, "prompt-ref", "", "agent prompt reference")
@@ -381,6 +438,7 @@ func init() {
 	watchCmd.Flags().BoolVar(&watchOptions.once, "once", false, "list and reconcile once, then exit")
 	watchCmd.Flags().BoolVar(&watchOptions.retryFailed, "retry-failed", false, "reconcile FactoryTasks whose phase is Failed")
 	watchCmd.Flags().BoolVar(&watchOptions.report, "report", true, "write reporting.comment results when spec.reporting is configured")
+	watchCmd.Flags().BoolVar(&watchOptions.createChangeRequest, "create-change-request", true, "create PR/MR when spec.changeRequest is configured")
 	patchStatusCmd.Flags().StringVarP(&patchStatusOptions.namespace, "namespace", "n", "default", "FactoryTask namespace")
 	patchStatusCmd.Flags().StringVar(&patchStatusOptions.phase, "phase", taskpkg.PhasePending, "FactoryTask phase")
 	patchStatusCmd.Flags().StringVar(&patchStatusOptions.message, "message", "", "status message")
@@ -608,7 +666,33 @@ func executeTask(out io.Writer, task *taskpkg.FactoryTask, taskData []byte, appl
 	}); err != nil {
 		return err
 	}
-	reportTaskResult(out, task, taskpkg.PhaseSucceeded, "FactoryTask completed successfully", reportingEnabled(controllerName))
+	resultMessage := "FactoryTask completed successfully"
+	resultURL, err := createTaskChangeRequest(task, changeRequestEnabled(controllerName))
+	if err != nil {
+		_ = patchTaskStatus(namespace, task.Metadata.Name, taskpkg.StatusPatchOptions{
+			Phase:            taskpkg.PhaseFailed,
+			Reason:           "ChangeRequestCreateFailed",
+			Message:          err.Error(),
+			SandboxClaimName: claim,
+			SandboxName:      sandboxName,
+		})
+		reportTaskResult(out, task, taskpkg.PhaseFailed, fmt.Sprintf("Change request creation failed: %v", err), reportingEnabled(controllerName))
+		return err
+	}
+	if resultURL != "" {
+		resultMessage = fmt.Sprintf("FactoryTask completed successfully\n\nChange request: %s", resultURL)
+		if err := patchTaskStatus(namespace, task.Metadata.Name, taskpkg.StatusPatchOptions{
+			Phase:            taskpkg.PhaseSucceeded,
+			Reason:           "ChangeRequestCreated",
+			Message:          "Change request created",
+			SandboxClaimName: claim,
+			SandboxName:      sandboxName,
+			LastResultURL:    resultURL,
+		}); err != nil {
+			return err
+		}
+	}
+	reportTaskResult(out, task, taskpkg.PhaseSucceeded, resultMessage, reportingEnabled(controllerName))
 	fmt.Fprintln(out, "PASS")
 	return nil
 }
@@ -622,6 +706,28 @@ func reportingEnabled(controllerName string) bool {
 	default:
 		return true
 	}
+}
+
+func changeRequestEnabled(controllerName string) bool {
+	switch controllerName {
+	case "run-once":
+		return runOnceOptions.createChangeRequest
+	case "watch-controller":
+		return watchOptions.createChangeRequest
+	default:
+		return true
+	}
+}
+
+func createTaskChangeRequest(task *taskpkg.FactoryTask, enabled bool) (string, error) {
+	if !enabled || !task.Spec.ChangeRequest.Enabled {
+		return "", nil
+	}
+	result, err := taskpkg.CreateChangeRequest(context.Background(), task, taskpkg.ChangeRequestOptions{})
+	if err != nil {
+		return "", err
+	}
+	return result.URL, nil
 }
 
 func reportTaskResult(out io.Writer, task *taskpkg.FactoryTask, phase, message string, enabled bool) {
