@@ -87,9 +87,9 @@ spec:
 	if err != nil {
 		t.Fatalf("failed to parse config: %v", err)
 	}
-	
+
 	proxyServer := proxy.NewServer(config)
-	
+
 	upstreamURL, err := url.Parse(upstream.URL)
 	if err != nil {
 		t.Fatalf("failed to parse upstream URL: %v", err)
@@ -97,6 +97,8 @@ spec:
 
 	// Customize the transport to trust the upstream test server (proxy -> upstream)
 	transport := http.DefaultTransport.(*http.Transport).Clone()
+	// Keep the e2e flow deterministic by bypassing host proxy env vars.
+	transport.Proxy = nil
 	transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} // Proxy trusts upstream
 	transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
 		if addr == "example-upstream.test:443" {
@@ -154,7 +156,7 @@ spec:
 			ServerName: "example-upstream.test", // explicitly set SNI to match upstream
 		},
 	}
-	
+
 	conn, err := dialer.DialContext(context.Background(), "tcp", fmt.Sprintf("127.0.0.1:%d", proxyPort))
 	if err != nil {
 		t.Fatalf("failed to dial proxy: %v", err)
