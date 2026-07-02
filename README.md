@@ -123,7 +123,20 @@ go run ./factory/cmd/factory task controller watch --namespace default
 
 The watch controller polls `FactoryTask` resources, reconciles tasks whose phase is empty, `Pending`, `ClaimCreated`, or `SandboxReady`, creates the matching `SandboxClaim`, executes the generated plan, and patches status. Use `--once` for a single reconciliation pass and `--retry-failed` to retry failed tasks.
 
-GitHub/GitLab issue webhooks are still a future layer.
+Deploy the long-running FactoryTask runtime into the active cluster with:
+
+```bash
+FACTORY_IMAGE=registry.example.com/ai-factory/factory:latest \
+INSTALL_FACTORY_TASK_RUNTIME=true \
+GITHUB_TOKEN=... \
+GITLAB_TOKEN=... \
+WEBHOOK_SECRET=... \
+components/factory-task/install
+```
+
+This installs the watch controller, the GitHub/GitLab issue webhook service,
+RBAC, and optional provider credentials. See
+`components/factory-task/README.md` for runtime settings and webhook endpoints.
 
 We follow a **Spec-Driven Development** process for complex features, handled entirely by interacting agents:
 1. **Spec Generation:** The `speccer` agent generates specifications.
