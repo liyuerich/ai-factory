@@ -626,7 +626,7 @@ func executeTask(out io.Writer, task *taskpkg.FactoryTask, taskData []byte, appl
 		return err
 	}
 
-	sandboxName, err := kubectlOutput("get", "sandboxclaim", claim, "-n", namespace, "-o", "jsonpath={.status.sandboxName}")
+	sandboxName, err := kubectlOutput("get", "sandboxclaim", claim, "-n", namespace, "-o", "jsonpath={.status.sandbox.name}")
 	if err != nil {
 		return err
 	}

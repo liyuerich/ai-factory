@@ -26,7 +26,7 @@ import (
 const (
 	defaultNamespace = "default"
 
-	sandboxClaimAPIVersion = "extensions.agents.x-k8s.io/v1alpha1"
+	sandboxClaimAPIVersion = "extensions.agents.x-k8s.io/v1beta1"
 	sandboxClaimKind       = "SandboxClaim"
 	taskNameLabel          = "factory.ai.gke.io/task"
 	taskProviderLabel      = "factory.ai.gke.io/provider"
@@ -79,7 +79,7 @@ func Reconcile(task *FactoryTask) (*ReconcileOutput, error) {
 			},
 		},
 		Spec: map[string]interface{}{
-			"templateRef": map[string]interface{}{
+			"warmPoolRef": map[string]interface{}{
 				"name": plan.SandboxTemplate,
 			},
 		},
