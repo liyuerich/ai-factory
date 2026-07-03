@@ -1,0 +1,142 @@
+# Copyright 2026 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+name: Kind Run Once
+
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+    inputs:
+      repository:
+        description: Repository cloned by the FactoryTask.
+        required: true
+        default: liyuerich/ai-factory
+      base_ref:
+        description: Git ref checked out by the FactoryTask.
+        required: true
+        default: main
+      command:
+        description: Command executed in the sandbox after clone and checkout.
+        required: true
+        default: test -f factory/pkg/task/controller.go
+
+jobs:
+  run-once:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    env:
+      KIND_CLUSTER_NAME: ai-factory-ci
+      AGENT_SANDBOX_SRC: ${{ runner.temp }}/agent-sandbox
+      IMAGE_PREFIX: ai-factory
+      IMAGE_TAG: ci
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version-file: go.mod
+        cache: true
+
+    - name: Create kind cluster
+      uses: helm/kind-action@v1.12.0
+      with:
+        cluster_name: ${{ env.KIND_CLUSTER_NAME }}
+        node_image: kindest/node:v1.34.3
+
+    - name: Install FactoryTask CRD
+      run: components/factory-task/install
+
+    - name: Install agent-sandbox
+      run: |
+        git clone --depth=1 https://github.com/kubernetes-sigs/agent-sandbox.git "${AGENT_SANDBOX_SRC}"
+        components/agent-sandbox/install
+
+    - name: Create sandbox warm pool
+      run: |
+        kubectl apply -f - <<'EOF'
+        apiVersion: extensions.agents.x-k8s.io/v1beta1
+        kind: SandboxTemplate
+        metadata:
+          name: go-dev
+          namespace: default
+        spec:
+          envVarsInjectionPolicy: Allowed
+          networkPolicyManagement: Unmanaged
+          podTemplate:
+            spec:
+              containers:
+              - name: dev
+                image: docker.io/alpine/git:2.49.1
+                command:
+                - /bin/sh
+                - -lc
+                - mkdir -p /workspace && sleep 3600
+                workingDir: /workspace
+        ---
+        apiVersion: extensions.agents.x-k8s.io/v1beta1
+        kind: SandboxWarmPool
+        metadata:
+          name: go-dev
+          namespace: default
+        spec:
+          replicas: 1
+          sandboxTemplateRef:
+            name: go-dev
+        EOF
+        kubectl wait sandboxwarmpool go-dev -n default --for=jsonpath='{.status.readyReplicas}'=1 --timeout=180s
+
+    - name: Run commands-only FactoryTask
+      env:
+        FACTORY_REPOSITORY: ${{ inputs.repository }}
+        FACTORY_BASE_REF: ${{ inputs.base_ref }}
+        FACTORY_COMMAND: ${{ inputs.command }}
+      run: |
+        cat > "${RUNNER_TEMP}/commands-only.yaml" <<EOF
+        apiVersion: factory.ai.gke.io/v1alpha1
+        kind: FactoryTask
+        metadata:
+          name: commands-only-ci
+          namespace: default
+        spec:
+          source:
+            provider: github
+            repository: ${FACTORY_REPOSITORY}
+            baseRef: ${FACTORY_BASE_REF}
+          agent:
+            name: builder
+          sandbox:
+            templateRef: go-dev
+          work:
+            instructions: ""
+            commands:
+            - ${FACTORY_COMMAND}
+          changeRequest:
+            enabled: false
+        EOF
+        go run ./factory/cmd/factory task controller run-once "${RUNNER_TEMP}/commands-only.yaml" \
+          --create-change-request=false \
+          --report=false \
+          --timeout=180s
+
+    - name: Show FactoryTask status
+      if: always()
+      run: |
+        kubectl get factorytasks,sandboxclaims,sandboxwarmpools,pods -A
+        kubectl get factorytask commands-only-ci -n default -o yaml || true
