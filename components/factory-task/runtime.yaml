@@ -139,7 +139,10 @@ spec:
             --require-label=__REQUIRE_LABEL__ \
             --sandbox-template=__SANDBOX_TEMPLATE__ \
             --agent=__AGENT_NAME__ \
-            --command=__TASK_COMMAND__ \
+            --agent-command="__AGENT_COMMAND__" \
+            --prompt-ref=__PROMPT_REF__ \
+            --change-request=__CHANGE_REQUEST__ \
+            --command="__TASK_COMMAND__" \
             --secret="${WEBHOOK_SECRET:-}"
         ports:
         - name: http

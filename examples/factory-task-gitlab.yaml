@@ -14,6 +14,7 @@ spec:
   agent:
     name: builder
     promptRef: .agents/builder/agent.md
+    command: gemini --yolo
   sandbox:
     templateRef: go-dev
   work:

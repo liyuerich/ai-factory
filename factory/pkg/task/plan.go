@@ -15,6 +15,7 @@
 package task
 
 import (
+	"encoding/base64"
 	"fmt"
 	"net/url"
 	"strings"
@@ -32,6 +33,8 @@ type ExecutionPlan struct {
 	GitAuthTokenEnv string
 	GitAuthUsername string
 	AgentName       string
+	AgentCommand    string
+	AgentPromptRef  string
 	SandboxTemplate string
 	SandboxClaim    string
 	ContainerName   string
@@ -67,6 +70,10 @@ func BuildExecutionPlan(task *FactoryTask) (*ExecutionPlan, error) {
 		containerName = "dev"
 	}
 	workDir := "/workspace/repo"
+	agentCommand := task.Spec.Agent.Command
+	if agentCommand == "" {
+		agentCommand = "gemini --yolo"
+	}
 
 	plan := &ExecutionPlan{
 		TaskName:        task.Metadata.Name,
@@ -79,6 +86,8 @@ func BuildExecutionPlan(task *FactoryTask) (*ExecutionPlan, error) {
 		GitAuthTokenEnv: authTokenEnv,
 		GitAuthUsername: authUsername,
 		AgentName:       task.Spec.Agent.Name,
+		AgentCommand:    agentCommand,
+		AgentPromptRef:  task.Spec.Agent.PromptRef,
 		SandboxTemplate: task.Spec.Sandbox.TemplateRef,
 		SandboxClaim:    claimName,
 		ContainerName:   containerName,
@@ -109,6 +118,13 @@ func BuildExecutionPlan(task *FactoryTask) (*ExecutionPlan, error) {
 		plan.Steps = append(plan.Steps, ExecutionStep{
 			Name:    "create change branch",
 			Command: []string{"git", "-C", workDir, "checkout", "-B", changeBranch},
+		})
+	}
+
+	if strings.TrimSpace(task.Spec.Work.Instructions) != "" {
+		plan.Steps = append(plan.Steps, ExecutionStep{
+			Name:    "run coding agent",
+			Command: []string{"/bin/sh", "-lc", runAgentScript(workDir, task.Spec.Work.Instructions, task.Spec.Agent.PromptRef, agentCommand)},
 		})
 	}
 
@@ -192,6 +208,45 @@ func commitChangesScript(workDir, commitMessage, authorName, authorEmail string)
 
 func pushChangeBranchScript(workDir, remoteName, branchName, targetBranch string) string {
 	return fmt.Sprintf("cd %s && if [ \"$(git rev-parse HEAD)\" = \"$(git rev-parse %s)\" ]; then echo 'No change branch push needed'; else git push -u %s %s; fi", shellQuote(workDir), shellQuote(targetBranch), shellQuote(remoteName), shellQuote(branchName))
+}
+
+func runAgentScript(workDir, instructions, promptRef, agentCommand string) string {
+	encodedInstructions := base64.StdEncoding.EncodeToString([]byte(instructions))
+	return fmt.Sprintf(`set -eu
+cd %s
+mkdir -p .ai-factory
+printf %%s %s | base64 -d > .ai-factory/task-instructions.md
+PROMPT_INPUT=.ai-factory/agent-prompt.md
+: > "$PROMPT_INPUT"
+if [ -n %s ]; then
+  if [ ! -f %s ]; then
+    printf 'agent promptRef not found: %%s\n' %s >&2
+    exit 1
+  fi
+  cat %s >> "$PROMPT_INPUT"
+  printf '\n\n' >> "$PROMPT_INPUT"
+fi
+cat >> "$PROMPT_INPUT" <<'EOF'
+## FactoryTask instructions
+
+EOF
+cat .ai-factory/task-instructions.md >> "$PROMPT_INPUT"
+export GEMINI_CLI_TRUST_WORKSPACE="${GEMINI_CLI_TRUST_WORKSPACE:-true}"
+if [ -n "${GEMINI_SERVICE_PORTAL:-}" ]; then
+  export HTTPS_PROXY="$GEMINI_SERVICE_PORTAL"
+fi
+if [ -n "${GEMINI_SERVICE_PORTAL_CA_CERTS:-}" ]; then
+  export NODE_EXTRA_CA_CERTS="$GEMINI_SERVICE_PORTAL_CA_CERTS"
+fi
+/bin/sh -lc %s < "$PROMPT_INPUT"`,
+		shellQuote(workDir),
+		shellQuote(encodedInstructions),
+		shellQuote(promptRef),
+		shellQuote(promptRef),
+		shellQuote(promptRef),
+		shellQuote(promptRef),
+		shellQuote(agentCommand),
+	)
 }
 
 func configureGitCredentialsScript(host, tokenEnv, username string) string {
