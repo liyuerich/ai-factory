@@ -1,0 +1,52 @@
+#!/bin/bash
+# Copyright 2026 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+set -euo pipefail
+
+DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+
+FACTORY_IMAGE=${FACTORY_IMAGE:-}
+FACTORY_NAMESPACE=${FACTORY_NAMESPACE:-factory-system}
+FACTORY_TASK_NAMESPACE=${FACTORY_TASK_NAMESPACE:-default}
+IMAGE_PULL_POLICY=${IMAGE_PULL_POLICY:-IfNotPresent}
+WATCH_INTERVAL=${WATCH_INTERVAL:-15s}
+SANDBOX_TIMEOUT=${SANDBOX_TIMEOUT:-5m}
+REQUIRE_LABEL=${REQUIRE_LABEL:-ai-factory}
+SANDBOX_TEMPLATE=${SANDBOX_TEMPLATE:-go-dev}
+AGENT_NAME=${AGENT_NAME:-builder}
+TASK_COMMAND=${TASK_COMMAND:-go test ./...}
+
+if [[ -z "${FACTORY_IMAGE}" ]]; then
+    echo "Error: FACTORY_IMAGE is required." >&2
+    echo "Example: FACTORY_IMAGE=registry.example.com/ai-factory/factory:latest components/factory-task/render-runtime" >&2
+    exit 1
+fi
+
+sed_escape() {
+    printf '%s' "$1" | sed -e 's/[\/&|]/\\&/g'
+}
+
+sed \
+    -e "s|__NAMESPACE__|$(sed_escape "${FACTORY_NAMESPACE}")|g" \
+    -e "s|__TASK_NAMESPACE__|$(sed_escape "${FACTORY_TASK_NAMESPACE}")|g" \
+    -e "s|__FACTORY_IMAGE__|$(sed_escape "${FACTORY_IMAGE}")|g" \
+    -e "s|__IMAGE_PULL_POLICY__|$(sed_escape "${IMAGE_PULL_POLICY}")|g" \
+    -e "s|__WATCH_INTERVAL__|$(sed_escape "${WATCH_INTERVAL}")|g" \
+    -e "s|__SANDBOX_TIMEOUT__|$(sed_escape "${SANDBOX_TIMEOUT}")|g" \
+    -e "s|__REQUIRE_LABEL__|$(sed_escape "${REQUIRE_LABEL}")|g" \
+    -e "s|__SANDBOX_TEMPLATE__|$(sed_escape "${SANDBOX_TEMPLATE}")|g" \
+    -e "s|__AGENT_NAME__|$(sed_escape "${AGENT_NAME}")|g" \
+    -e "s|__TASK_COMMAND__|$(sed_escape "${TASK_COMMAND}")|g" \
+    "${DIR}/runtime.yaml"

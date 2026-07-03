@@ -22,3 +22,41 @@ kubectl apply -f "${DIR}/crd.yaml"
 
 echo "FactoryTask CRD installed."
 
+INSTALL_FACTORY_TASK_RUNTIME=${INSTALL_FACTORY_TASK_RUNTIME:-false}
+
+if [[ "${INSTALL_FACTORY_TASK_RUNTIME}" != "true" ]]; then
+    exit 0
+fi
+
+FACTORY_IMAGE=${FACTORY_IMAGE:-}
+FACTORY_NAMESPACE=${FACTORY_NAMESPACE:-factory-system}
+GITHUB_TOKEN=${GITHUB_TOKEN:-}
+GITLAB_TOKEN=${GITLAB_TOKEN:-}
+WEBHOOK_SECRET=${WEBHOOK_SECRET:-}
+
+if [[ -z "${FACTORY_IMAGE}" ]]; then
+    echo "Error: FACTORY_IMAGE is required when INSTALL_FACTORY_TASK_RUNTIME=true."
+    echo "Example: FACTORY_IMAGE=registry.example.com/ai-factory/factory:latest INSTALL_FACTORY_TASK_RUNTIME=true components/factory-task/install"
+    exit 1
+fi
+
+kubectl create namespace "${FACTORY_NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
+
+SECRET_ARGS=()
+if [[ -n "${GITHUB_TOKEN}" ]]; then
+    SECRET_ARGS+=(--from-literal="GITHUB_TOKEN=${GITHUB_TOKEN}")
+fi
+if [[ -n "${GITLAB_TOKEN}" ]]; then
+    SECRET_ARGS+=(--from-literal="GITLAB_TOKEN=${GITLAB_TOKEN}")
+fi
+if [[ -n "${WEBHOOK_SECRET}" ]]; then
+    SECRET_ARGS+=(--from-literal="WEBHOOK_SECRET=${WEBHOOK_SECRET}")
+fi
+
+if [[ ${#SECRET_ARGS[@]} -gt 0 ]]; then
+    kubectl -n "${FACTORY_NAMESPACE}" create secret generic factory-task-secrets "${SECRET_ARGS[@]}" --dry-run=client -o yaml | kubectl apply -f -
+fi
+
+"${DIR}/render-runtime" | kubectl apply -f -
+
+echo "FactoryTask runtime installed."
