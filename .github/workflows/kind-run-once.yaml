@@ -134,8 +134,78 @@ jobs:
           --report=false \
           --timeout=180s
 
+    - name: Run GitHub issue webhook FactoryTask
+      env:
+        FACTORY_REPOSITORY: ${{ inputs.repository }}
+        FACTORY_BASE_REF: ${{ inputs.base_ref }}
+        FACTORY_COMMAND: ${{ inputs.command }}
+      run: |
+        TASK_NAME="github-$(printf '%s' "${FACTORY_REPOSITORY}" | tr '[:upper:]/_' '[:lower:]--')-42"
+        cat > "${RUNNER_TEMP}/github-issue.json" <<EOF
+        {
+          "action": "opened",
+          "issue": {
+            "number": 42,
+            "title": "Validate ai-factory webhook flow",
+            "body": "Validate that a GitHub issue webhook creates and runs a FactoryTask.",
+            "html_url": "https://github.com/${FACTORY_REPOSITORY}/issues/42",
+            "user": {"login": "ai-factory-ci"},
+            "labels": [{"name": "ai-factory"}]
+          },
+          "repository": {
+            "full_name": "${FACTORY_REPOSITORY}",
+            "html_url": "https://github.com/${FACTORY_REPOSITORY}",
+            "clone_url": "https://github.com/${FACTORY_REPOSITORY}.git",
+            "default_branch": "${FACTORY_BASE_REF}"
+          },
+          "sender": {"login": "ai-factory-ci"}
+        }
+        EOF
+
+        go run ./factory/cmd/factory task webhook serve \
+          --addr 127.0.0.1:8080 \
+          --apply \
+          --repository "${FACTORY_REPOSITORY}" \
+          --trigger-action opened \
+          --require-label ai-factory \
+          --sandbox-template go-dev \
+          --agent-command 'cat >/tmp/ai-factory-agent-prompt.txt' \
+          --command "${FACTORY_COMMAND}" \
+          --change-request=false \
+          --reporting-mode "" \
+          > "${RUNNER_TEMP}/webhook.log" 2>&1 &
+        WEBHOOK_PID=$!
+        trap 'kill "${WEBHOOK_PID}" 2>/dev/null || true' EXIT
+
+        WEBHOOK_DELIVERED=false
+        for _ in $(seq 1 30); do
+          if curl -fsS -X POST http://127.0.0.1:8080/webhook/github \
+            -H 'Content-Type: application/json' \
+            --data-binary @"${RUNNER_TEMP}/github-issue.json"; then
+            WEBHOOK_DELIVERED=true
+            break
+          fi
+          sleep 1
+        done
+        if [[ "${WEBHOOK_DELIVERED}" != "true" ]]; then
+          cat "${RUNNER_TEMP}/webhook.log"
+          exit 1
+        fi
+
+        kubectl get factorytask "${TASK_NAME}" -n default -o yaml
+        kubectl wait sandboxwarmpool go-dev -n default --for=jsonpath='{.status.readyReplicas}'=1 --timeout=180s
+        go run ./factory/cmd/factory task controller watch \
+          -n default \
+          --once \
+          --interval=1s \
+          --timeout=180s \
+          --create-change-request=false \
+          --report=false
+        kubectl wait factorytask "${TASK_NAME}" -n default --for=jsonpath='{.status.phase}'=Succeeded --timeout=60s
+
     - name: Show FactoryTask status
       if: always()
       run: |
         kubectl get factorytasks,sandboxclaims,sandboxwarmpools,pods -A || true
         kubectl get factorytask commands-only-ci -n default -o yaml || true
+        kubectl get factorytask github-liyuerich-ai-factory-42 -n default -o yaml || true
