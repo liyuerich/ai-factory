@@ -88,7 +88,7 @@ var planCmd = &cobra.Command{
 		if task.Spec.ChangeRequest.Enabled {
 			fmt.Fprintf(out, "changeBranch=%s targetBranch=%s\n", plan.ChangeBranch, plan.TargetBranch)
 		}
-		fmt.Fprintf(out, "sandboxTemplate=%s sandboxClaim=%s container=%s agent=%s\n", plan.SandboxTemplate, plan.SandboxClaim, plan.ContainerName, plan.AgentName)
+		fmt.Fprintf(out, "sandboxTemplate=%s sandboxClaim=%s container=%s agent=%s agentCommand=%s\n", plan.SandboxTemplate, plan.SandboxClaim, plan.ContainerName, plan.AgentName, plan.AgentCommand)
 		for _, step := range plan.Steps {
 			fmt.Fprintf(out, "- %s: %s\n", step.Name, strings.Join(step.Command, " "))
 		}
@@ -227,6 +227,7 @@ var webhookOptions struct {
 	provider           string
 	namespace          string
 	agent              string
+	agentCommand       string
 	promptRef          string
 	sandboxTemplateRef string
 	containerName      string
@@ -235,6 +236,7 @@ var webhookOptions struct {
 	triggerAction      []string
 	requireLabel       []string
 	repository         []string
+	changeRequest      bool
 }
 
 var webhookRenderCmd = &cobra.Command{
@@ -423,6 +425,7 @@ func init() {
 	changeRequestCreateCmd.Flags().BoolVar(&changeRequestCreateOptions.dryRun, "dry-run", false, "print the PR/MR request without sending it")
 	webhookCmd.PersistentFlags().StringVarP(&webhookOptions.namespace, "namespace", "n", "default", "FactoryTask namespace")
 	webhookCmd.PersistentFlags().StringVar(&webhookOptions.agent, "agent", "builder", "agent name for generated FactoryTasks")
+	webhookCmd.PersistentFlags().StringVar(&webhookOptions.agentCommand, "agent-command", "gemini --yolo", "agent runner command for generated FactoryTasks")
 	webhookCmd.PersistentFlags().StringVar(&webhookOptions.promptRef, "prompt-ref", "", "agent prompt reference")
 	webhookCmd.PersistentFlags().StringVar(&webhookOptions.sandboxTemplateRef, "sandbox-template", "go-dev", "sandbox template reference")
 	webhookCmd.PersistentFlags().StringVar(&webhookOptions.containerName, "container", "", "sandbox container name")
@@ -431,6 +434,7 @@ func init() {
 	webhookCmd.PersistentFlags().StringArrayVar(&webhookOptions.triggerAction, "trigger-action", nil, "issue action that can trigger a FactoryTask; can be repeated")
 	webhookCmd.PersistentFlags().StringArrayVar(&webhookOptions.requireLabel, "require-label", nil, "issue label required to trigger a FactoryTask; can be repeated")
 	webhookCmd.PersistentFlags().StringArrayVar(&webhookOptions.repository, "repository", nil, "repository allowed to trigger FactoryTasks; can be repeated")
+	webhookCmd.PersistentFlags().BoolVar(&webhookOptions.changeRequest, "change-request", true, "enable branch, commit, push, and PR/MR creation for generated FactoryTasks")
 	webhookRenderCmd.Flags().StringVar(&webhookOptions.provider, "provider", taskpkg.ProviderGitHub, "webhook provider: github or gitlab")
 	webhookServeCmd.Flags().StringVar(&webhookServeOptions.addr, "addr", ":8080", "listen address")
 	webhookServeCmd.Flags().StringVar(&webhookServeOptions.secret, "secret", "", "webhook secret for GitHub signatures or GitLab tokens")
@@ -483,17 +487,19 @@ func readPayload(path string) ([]byte, error) {
 
 func issueWebhookOptions() taskpkg.IssueWebhookOptions {
 	return taskpkg.IssueWebhookOptions{
-		Provider:           webhookOptions.provider,
-		Namespace:          webhookOptions.namespace,
-		AgentName:          webhookOptions.agent,
-		PromptRef:          webhookOptions.promptRef,
-		SandboxTemplateRef: webhookOptions.sandboxTemplateRef,
-		ContainerName:      webhookOptions.containerName,
-		ReportingMode:      webhookOptions.reportingMode,
-		Commands:           webhookOptions.command,
-		TriggerActions:     webhookOptions.triggerAction,
-		RequiredLabels:     webhookOptions.requireLabel,
-		Repositories:       webhookOptions.repository,
+		Provider:             webhookOptions.provider,
+		Namespace:            webhookOptions.namespace,
+		AgentName:            webhookOptions.agent,
+		AgentCommand:         webhookOptions.agentCommand,
+		PromptRef:            webhookOptions.promptRef,
+		SandboxTemplateRef:   webhookOptions.sandboxTemplateRef,
+		ContainerName:        webhookOptions.containerName,
+		ReportingMode:        webhookOptions.reportingMode,
+		Commands:             webhookOptions.command,
+		TriggerActions:       webhookOptions.triggerAction,
+		RequiredLabels:       webhookOptions.requireLabel,
+		Repositories:         webhookOptions.repository,
+		ChangeRequestEnabled: webhookOptions.changeRequest,
 	}
 }
 

@@ -299,6 +299,55 @@ spec:
 	}
 }
 
+func TestBuildExecutionPlanRunsCodingAgentForInstructions(t *testing.T) {
+	task, err := Parse([]byte(`
+apiVersion: factory.ai.gke.io/v1alpha1
+kind: FactoryTask
+metadata:
+  name: fix-docs
+spec:
+  source:
+    provider: github
+    repository: liyuerich/ai-factory
+    baseRef: main
+  agent:
+    name: builder
+    promptRef: .agents/builder/agent.md
+    command: codex exec --full-auto
+  sandbox:
+    templateRef: go-dev
+  work:
+    instructions: |
+      Update the README with setup notes.
+    commands:
+    - go test ./...
+`))
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+
+	plan, err := BuildExecutionPlan(task)
+	if err != nil {
+		t.Fatalf("BuildExecutionPlan() error = %v", err)
+	}
+	if plan.AgentCommand != "codex exec --full-auto" {
+		t.Fatalf("AgentCommand = %q", plan.AgentCommand)
+	}
+	if got, want := len(plan.Steps), 4; got != want {
+		t.Fatalf("len(Steps) = %d, want %d", got, want)
+	}
+	if plan.Steps[2].Name != "run coding agent" {
+		t.Fatalf("step[2].Name = %q", plan.Steps[2].Name)
+	}
+	command := strings.Join(plan.Steps[2].Command, " ")
+	if !strings.Contains(command, ".agents/builder/agent.md") {
+		t.Fatalf("agent command = %#v", plan.Steps[2].Command)
+	}
+	if !strings.Contains(command, "codex exec --full-auto") {
+		t.Fatalf("agent command = %#v", plan.Steps[2].Command)
+	}
+}
+
 func TestParseRejectsConflictingChangeRequestBranchFields(t *testing.T) {
 	_, err := Parse([]byte(`
 apiVersion: factory.ai.gke.io/v1alpha1

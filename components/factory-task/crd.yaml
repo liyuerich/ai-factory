@@ -90,6 +90,8 @@ spec:
                     minLength: 1
                   promptRef:
                     type: string
+                  command:
+                    type: string
               sandbox:
                 type: object
                 required:

@@ -63,6 +63,31 @@ func TestFactoryTaskFromGitHubIssueWebhook(t *testing.T) {
 	}
 }
 
+func TestFactoryTaskFromGitHubIssueWebhookWithChangeRequest(t *testing.T) {
+	task, err := FactoryTaskFromIssueWebhook([]byte(githubIssuePayload), IssueWebhookOptions{
+		Provider:             ProviderGitHub,
+		AgentName:            "builder",
+		AgentCommand:         "codex exec --full-auto",
+		SandboxTemplateRef:   "go-dev",
+		ChangeRequestEnabled: true,
+	})
+	if err != nil {
+		t.Fatalf("FactoryTaskFromIssueWebhook() error = %v", err)
+	}
+	if task.Spec.Agent.Command != "codex exec --full-auto" {
+		t.Fatalf("agent.command = %q", task.Spec.Agent.Command)
+	}
+	if !task.Spec.ChangeRequest.Enabled {
+		t.Fatal("changeRequest.enabled = false")
+	}
+	if task.Spec.ChangeRequest.BranchPrefix != "factory-task" {
+		t.Fatalf("branchPrefix = %q", task.Spec.ChangeRequest.BranchPrefix)
+	}
+	if !strings.Contains(task.Spec.ChangeRequest.CommitMessage, "Add webhook support") {
+		t.Fatalf("commitMessage = %q", task.Spec.ChangeRequest.CommitMessage)
+	}
+}
+
 func TestFactoryTaskFromGitHubIssueWebhookIgnoredWithoutRequiredLabel(t *testing.T) {
 	_, err := FactoryTaskFromIssueWebhook([]byte(githubIssuePayload), IssueWebhookOptions{
 		Provider:           ProviderGitHub,

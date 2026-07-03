@@ -37,7 +37,10 @@ installer without those values leaves any existing secret untouched.
 | `REQUIRE_LABEL` | `ai-factory` | Issue label required to trigger tasks. |
 | `SANDBOX_TEMPLATE` | `go-dev` | Sandbox template used for generated tasks. |
 | `AGENT_NAME` | `builder` | Agent name used for generated tasks. |
+| `AGENT_COMMAND` | `gemini --yolo` | Agent runner command used for generated tasks. |
+| `PROMPT_REF` | `.agents/builder/agent.md` | Agent prompt file read from the cloned repository. |
 | `TASK_COMMAND` | `go test ./...` | Command inserted into generated FactoryTasks. |
+| `CHANGE_REQUEST` | `true` | Whether webhook-generated tasks should branch, commit, push, and create PRs/MRs. |
 | `GITHUB_TOKEN` | empty | Token used for GitHub issue comments and pull requests. |
 | `GITLAB_TOKEN` | empty | Token used for GitLab issue comments and merge requests. |
 | `WEBHOOK_SECRET` | empty | GitHub webhook secret or GitLab webhook token. |
@@ -101,6 +104,18 @@ curl -X POST http://127.0.0.1:8080/webhook/github \
   -H 'X-GitHub-Event: issues' \
   --data-binary @examples/webhook-github-issue.json
 ```
+
+## Agent runner
+
+Webhook-generated tasks now use the issue title/body as
+`spec.work.instructions`. During reconciliation, the controller runs the
+configured coding agent inside the cloned repository before running validation
+commands. The generated prompt is the optional `spec.agent.promptRef` file plus
+the FactoryTask instructions.
+
+The default runner is `gemini --yolo`; set `AGENT_COMMAND` for webhook-generated
+tasks or `spec.agent.command` on a hand-written `FactoryTask` to use another
+runner such as Codex.
 
 ## Sandbox git authentication
 

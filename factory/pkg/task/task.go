@@ -86,6 +86,7 @@ type TriggerSpec struct {
 type AgentSpec struct {
 	Name      string `yaml:"name"`
 	PromptRef string `yaml:"promptRef,omitempty"`
+	Command   string `yaml:"command,omitempty"`
 }
 
 // SandboxSpec describes the sandbox that should execute the task.

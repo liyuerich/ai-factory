@@ -26,7 +26,10 @@ SANDBOX_TIMEOUT=${SANDBOX_TIMEOUT:-5m}
 REQUIRE_LABEL=${REQUIRE_LABEL:-ai-factory}
 SANDBOX_TEMPLATE=${SANDBOX_TEMPLATE:-go-dev}
 AGENT_NAME=${AGENT_NAME:-builder}
+AGENT_COMMAND=${AGENT_COMMAND:-gemini --yolo}
+PROMPT_REF=${PROMPT_REF:-.agents/builder/agent.md}
 TASK_COMMAND=${TASK_COMMAND:-go test ./...}
+CHANGE_REQUEST=${CHANGE_REQUEST:-true}
 WEBHOOK_INGRESS_HOST=${WEBHOOK_INGRESS_HOST:-}
 WEBHOOK_INGRESS_CLASS=${WEBHOOK_INGRESS_CLASS:-}
 
@@ -50,7 +53,10 @@ sed \
     -e "s|__REQUIRE_LABEL__|$(sed_escape "${REQUIRE_LABEL}")|g" \
     -e "s|__SANDBOX_TEMPLATE__|$(sed_escape "${SANDBOX_TEMPLATE}")|g" \
     -e "s|__AGENT_NAME__|$(sed_escape "${AGENT_NAME}")|g" \
+    -e "s|__AGENT_COMMAND__|$(sed_escape "${AGENT_COMMAND}")|g" \
+    -e "s|__PROMPT_REF__|$(sed_escape "${PROMPT_REF}")|g" \
     -e "s|__TASK_COMMAND__|$(sed_escape "${TASK_COMMAND}")|g" \
+    -e "s|__CHANGE_REQUEST__|$(sed_escape "${CHANGE_REQUEST}")|g" \
     "${DIR}/runtime.yaml"
 
 if [[ -n "${WEBHOOK_INGRESS_HOST}" ]]; then

@@ -151,6 +151,7 @@ func TestIssueWebhookHandlerIgnoresMissingRequiredLabel(t *testing.T) {
 		provider           string
 		namespace          string
 		agent              string
+		agentCommand       string
 		promptRef          string
 		sandboxTemplateRef string
 		containerName      string
@@ -159,6 +160,7 @@ func TestIssueWebhookHandlerIgnoresMissingRequiredLabel(t *testing.T) {
 		triggerAction      []string
 		requireLabel       []string
 		repository         []string
+		changeRequest      bool
 	}{
 		namespace:          "factory-system",
 		agent:              "builder",
