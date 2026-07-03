@@ -58,7 +58,6 @@ jobs:
       uses: helm/kind-action@v1.12.0
       with:
         cluster_name: ${{ env.KIND_CLUSTER_NAME }}
-        node_image: kindest/node:v1.34.3
 
     - name: Install FactoryTask CRD
       run: components/factory-task/install
@@ -138,5 +137,5 @@ jobs:
     - name: Show FactoryTask status
       if: always()
       run: |
-        kubectl get factorytasks,sandboxclaims,sandboxwarmpools,pods -A
+        kubectl get factorytasks,sandboxclaims,sandboxwarmpools,pods -A || true
         kubectl get factorytask commands-only-ci -n default -o yaml || true
