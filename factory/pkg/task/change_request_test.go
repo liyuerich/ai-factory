@@ -105,6 +105,63 @@ func TestCreateChangeRequest(t *testing.T) {
 	}
 }
 
+func TestCreateChangeRequestTreatsGitHubAlreadyExistsAsSuccess(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		_, _ = w.Write([]byte(`{"message":"Validation Failed","errors":[{"message":"A pull request already exists for liyuerich:ai-factory/fix-docs."}]}`))
+	}))
+	defer server.Close()
+
+	result, err := CreateChangeRequest(context.Background(), mustChangeRequestTask(t, ProviderGitHub), ChangeRequestOptions{
+		Token:   "token",
+		APIBase: server.URL,
+	})
+	if err != nil {
+		t.Fatalf("CreateChangeRequest() error = %v", err)
+	}
+	if !result.AlreadyExists {
+		t.Fatalf("AlreadyExists = false")
+	}
+}
+
+func TestCreateChangeRequestClassifiesAuthFailure(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"message":"Resource not accessible by integration"}`))
+	}))
+	defer server.Close()
+
+	_, err := CreateChangeRequest(context.Background(), mustChangeRequestTask(t, ProviderGitHub), ChangeRequestOptions{
+		Token:   "token",
+		APIBase: server.URL,
+	})
+	if err == nil {
+		t.Fatal("CreateChangeRequest() error = nil, want auth error")
+	}
+	if !IsChangeRequestAuthError(err) {
+		t.Fatalf("error = %v, want auth classification", err)
+	}
+}
+
+func TestCreateChangeRequestTreatsGitLabAlreadyExistsAsSuccess(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusConflict)
+		_, _ = w.Write([]byte(`{"message":["Another open merge request already exists for this source branch"]}`))
+	}))
+	defer server.Close()
+
+	result, err := CreateChangeRequest(context.Background(), mustChangeRequestTask(t, ProviderGitLab), ChangeRequestOptions{
+		Token:   "token",
+		APIBase: server.URL,
+	})
+	if err != nil {
+		t.Fatalf("CreateChangeRequest() error = %v", err)
+	}
+	if !result.AlreadyExists {
+		t.Fatalf("AlreadyExists = false")
+	}
+}
+
 func mustChangeRequestTask(t *testing.T, provider string) *FactoryTask {
 	t.Helper()
 	repository := "liyuerich/ai-factory"

@@ -16,6 +16,7 @@ package task
 
 import (
 	"fmt"
+	"os"
 	"regexp"
 	"strings"
 
@@ -82,6 +83,18 @@ func Reconcile(task *FactoryTask) (*ReconcileOutput, error) {
 				"name": plan.SandboxTemplate,
 			},
 		},
+	}
+	if task.Spec.ChangeRequest.Enabled && plan.GitAuthTokenEnv != "" {
+		if token := os.Getenv(plan.GitAuthTokenEnv); token != "" {
+			env := map[string]interface{}{
+				"name":  plan.GitAuthTokenEnv,
+				"value": token,
+			}
+			if plan.ContainerName != "" {
+				env["containerName"] = plan.ContainerName
+			}
+			claim.Spec["env"] = []interface{}{env}
+		}
 	}
 
 	return &ReconcileOutput{

@@ -136,7 +136,8 @@ components/factory-task/install
 
 This installs the watch controller, the GitHub/GitLab issue webhook service,
 RBAC, and optional provider credentials. See
-`components/factory-task/README.md` for runtime settings and webhook endpoints.
+`components/factory-task/README.md` for runtime settings, optional Ingress,
+webhook endpoints, and sandbox git authentication.
 
 We follow a **Spec-Driven Development** process for complex features, handled entirely by interacting agents:
 1. **Spec Generation:** The `speccer` agent generates specifications.

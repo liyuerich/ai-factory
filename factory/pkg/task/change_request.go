@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -45,8 +46,29 @@ type ChangeRequest struct {
 
 // ChangeRequestResult is the provider-neutral result of a PR/MR creation call.
 type ChangeRequestResult struct {
-	Provider string
-	URL      string
+	Provider      string
+	URL           string
+	AlreadyExists bool
+}
+
+// ChangeRequestError classifies provider API failures so controllers can
+// distinguish setup problems from idempotent existing PRs/MRs.
+type ChangeRequestError struct {
+	Provider   string
+	StatusCode int
+	Status     string
+	Reason     string
+	Body       string
+}
+
+func (e *ChangeRequestError) Error() string {
+	if e == nil {
+		return ""
+	}
+	if e.Reason != "" {
+		return fmt.Sprintf("post %s change request: %s: %s", e.Provider, e.Status, e.Reason)
+	}
+	return fmt.Sprintf("post %s change request: unexpected status %s", e.Provider, e.Status)
 }
 
 // BuildChangeRequest builds a GitHub pull request or GitLab merge request call from a FactoryTask.
@@ -60,7 +82,7 @@ func BuildChangeRequest(task *FactoryTask, opts ChangeRequestOptions) (*ChangeRe
 	if !task.Spec.ChangeRequest.Enabled {
 		return nil, errors.New("spec.changeRequest.enabled must be true")
 	}
-	changeBranch, targetBranch, _, _, _, _ := changeRequestDefaults(task)
+	changeBranch, targetBranch, _, _, _, _, _, _ := changeRequestDefaults(task)
 	title := task.Spec.ChangeRequest.Title
 	if title == "" {
 		title = task.Spec.ChangeRequest.CommitMessage
@@ -106,13 +128,57 @@ func CreateChangeRequest(ctx context.Context, task *FactoryTask, opts ChangeRequ
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("post %s change request: unexpected status %s", req.Provider, resp.Status)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		apiErr := classifyChangeRequestError(req.Provider, resp.StatusCode, resp.Status, string(body))
+		if IsChangeRequestAlreadyExists(apiErr) {
+			return &ChangeRequestResult{Provider: req.Provider, AlreadyExists: true}, nil
+		}
+		return nil, apiErr
 	}
 	resultURL, err := decodeChangeRequestURL(req.Provider, resp)
 	if err != nil {
 		return nil, err
 	}
 	return &ChangeRequestResult{Provider: req.Provider, URL: resultURL}, nil
+}
+
+func IsChangeRequestAlreadyExists(err error) bool {
+	var apiErr *ChangeRequestError
+	return errors.As(err, &apiErr) && apiErr.Reason == "already_exists"
+}
+
+func IsChangeRequestAuthError(err error) bool {
+	var apiErr *ChangeRequestError
+	return errors.As(err, &apiErr) && apiErr.Reason == "auth_failed"
+}
+
+func IsChangeRequestMissingBranch(err error) bool {
+	var apiErr *ChangeRequestError
+	return errors.As(err, &apiErr) && apiErr.Reason == "source_branch_missing"
+}
+
+func classifyChangeRequestError(provider string, statusCode int, status, body string) error {
+	reason := ""
+	lowerBody := strings.ToLower(body)
+	switch {
+	case statusCode == http.StatusUnauthorized || statusCode == http.StatusForbidden:
+		reason = "auth_failed"
+	case provider == ProviderGitHub && statusCode == http.StatusUnprocessableEntity && strings.Contains(lowerBody, "pull request already exists"):
+		reason = "already_exists"
+	case provider == ProviderGitLab && statusCode == http.StatusConflict && strings.Contains(lowerBody, "merge request already exists"):
+		reason = "already_exists"
+	case provider == ProviderGitLab && statusCode == http.StatusBadRequest && strings.Contains(lowerBody, "source branch"):
+		reason = "source_branch_missing"
+	case provider == ProviderGitHub && statusCode == http.StatusUnprocessableEntity && strings.Contains(lowerBody, "head"):
+		reason = "source_branch_missing"
+	}
+	return &ChangeRequestError{
+		Provider:   provider,
+		StatusCode: statusCode,
+		Status:     status,
+		Reason:     reason,
+		Body:       body,
+	}
 }
 
 func buildGitHubPullRequest(task *FactoryTask, opts ChangeRequestOptions, head, base, title, body string) (*ChangeRequest, error) {
