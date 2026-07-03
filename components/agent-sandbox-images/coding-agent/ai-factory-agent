@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if command -v gemini >/dev/null 2>&1; then
+    exec gemini --yolo "$@"
+fi
+
+if command -v codex >/dev/null 2>&1; then
+    exec codex "$@"
+fi
+
+echo "No supported coding agent CLI found. Install gemini or codex in the sandbox image." >&2
+exit 127

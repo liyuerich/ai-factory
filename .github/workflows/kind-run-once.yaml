@@ -31,7 +31,7 @@ on:
       command:
         description: Command executed in the sandbox after clone and checkout.
         required: true
-        default: test -f factory/pkg/task/controller.go
+        default: test -f factory/pkg/task/controller.go && git --version && go version && node --version && python3 --version && gemini --version
 
 jobs:
   run-once:
@@ -43,6 +43,7 @@ jobs:
       AGENT_SANDBOX_SRC: /tmp/agent-sandbox
       IMAGE_PREFIX: ai-factory
       IMAGE_TAG: ci
+      CODING_AGENT_IMAGE: ai-factory/coding-agent-sandbox:ci
 
     steps:
     - name: Checkout
@@ -67,9 +68,16 @@ jobs:
         git clone --depth=1 https://github.com/kubernetes-sigs/agent-sandbox.git "${AGENT_SANDBOX_SRC}"
         components/agent-sandbox/install
 
+    - name: Build coding agent sandbox image
+      run: |
+        docker build \
+          -t "${CODING_AGENT_IMAGE}" \
+          components/agent-sandbox-images/coding-agent
+        kind load docker-image "${CODING_AGENT_IMAGE}" --name "${KIND_CLUSTER_NAME}"
+
     - name: Create sandbox warm pool
       run: |
-        kubectl apply -f - <<'EOF'
+        cat > "${RUNNER_TEMP}/go-dev-sandbox.yaml" <<EOF
         apiVersion: extensions.agents.x-k8s.io/v1beta1
         kind: SandboxTemplate
         metadata:
@@ -82,9 +90,10 @@ jobs:
             spec:
               containers:
               - name: dev
-                image: docker.io/alpine/git:2.49.1
+                image: ${CODING_AGENT_IMAGE}
+                imagePullPolicy: IfNotPresent
                 command:
-                - /bin/sh
+                - /bin/bash
                 - -lc
                 - mkdir -p /workspace && sleep 3600
                 workingDir: /workspace
@@ -99,6 +108,7 @@ jobs:
           sandboxTemplateRef:
             name: go-dev
         EOF
+        kubectl apply -f "${RUNNER_TEMP}/go-dev-sandbox.yaml"
         kubectl wait sandboxwarmpool go-dev -n default --for=jsonpath='{.status.readyReplicas}'=1 --timeout=180s
 
     - name: Run commands-only FactoryTask
