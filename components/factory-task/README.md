@@ -105,6 +105,20 @@ curl -X POST http://127.0.0.1:8080/webhook/github \
   --data-binary @examples/webhook-github-issue.json
 ```
 
+## GitHub Actions issue validation
+
+The `Issue FactoryTask` workflow validates real GitHub issue events without a
+public webhook endpoint. Create or reopen an issue with the `ai-factory` label,
+or add that label to an existing issue. The workflow starts a temporary kind
+cluster, installs agent-sandbox and the FactoryTask CRD, posts the real GitHub
+issue event payload to the local webhook server, and runs the generated
+`FactoryTask` with the watch controller.
+
+This workflow runs in agent dry-run mode by default: it captures the generated
+agent prompt with `cat >/tmp/ai-factory-agent-prompt.txt`, then runs validation
+commands in the coding-agent sandbox image. Use the runtime webhook deployment
+with a real `AGENT_COMMAND` and provider tokens for production PR/MR creation.
+
 ## Agent runner
 
 Webhook-generated tasks now use the issue title/body as

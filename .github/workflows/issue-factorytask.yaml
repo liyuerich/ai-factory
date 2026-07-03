@@ -1,0 +1,164 @@
+# Copyright 2026 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+name: Issue FactoryTask
+
+permissions:
+  contents: read
+
+on:
+  issues:
+    types:
+    - opened
+    - reopened
+    - labeled
+
+jobs:
+  issue-factorytask:
+    if: contains(github.event.issue.labels.*.name, 'ai-factory')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    env:
+      KIND_CLUSTER_NAME: ai-factory-issue
+      AGENT_SANDBOX_SRC: /tmp/agent-sandbox
+      IMAGE_PREFIX: ai-factory
+      IMAGE_TAG: ci
+      CODING_AGENT_IMAGE: ai-factory/coding-agent-sandbox:ci
+      FACTORY_COMMAND: test -s /tmp/ai-factory-agent-prompt.txt && test -f factory/pkg/task/controller.go && git --version && go version && node --version && python3 --version && gemini --version
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version-file: go.mod
+        cache: true
+
+    - name: Create kind cluster
+      uses: helm/kind-action@v1.12.0
+      with:
+        cluster_name: ${{ env.KIND_CLUSTER_NAME }}
+
+    - name: Install FactoryTask CRD
+      run: components/factory-task/install
+
+    - name: Install agent-sandbox
+      run: |
+        git clone --depth=1 https://github.com/kubernetes-sigs/agent-sandbox.git "${AGENT_SANDBOX_SRC}"
+        components/agent-sandbox/install
+
+    - name: Build coding agent sandbox image
+      run: |
+        docker build \
+          -t "${CODING_AGENT_IMAGE}" \
+          components/agent-sandbox-images/coding-agent
+        kind load docker-image "${CODING_AGENT_IMAGE}" --name "${KIND_CLUSTER_NAME}"
+
+    - name: Create sandbox warm pool
+      run: |
+        cat > "${RUNNER_TEMP}/go-dev-sandbox.yaml" <<EOF
+        apiVersion: extensions.agents.x-k8s.io/v1beta1
+        kind: SandboxTemplate
+        metadata:
+          name: go-dev
+          namespace: default
+        spec:
+          envVarsInjectionPolicy: Allowed
+          networkPolicyManagement: Unmanaged
+          podTemplate:
+            spec:
+              containers:
+              - name: dev
+                image: ${CODING_AGENT_IMAGE}
+                imagePullPolicy: IfNotPresent
+                command:
+                - /bin/bash
+                - -lc
+                - mkdir -p /workspace && sleep 3600
+                workingDir: /workspace
+        ---
+        apiVersion: extensions.agents.x-k8s.io/v1beta1
+        kind: SandboxWarmPool
+        metadata:
+          name: go-dev
+          namespace: default
+        spec:
+          replicas: 1
+          sandboxTemplateRef:
+            name: go-dev
+        EOF
+        kubectl apply -f "${RUNNER_TEMP}/go-dev-sandbox.yaml"
+        kubectl wait sandboxwarmpool go-dev -n default --for=jsonpath='{.status.readyReplicas}'=1 --timeout=180s
+
+    - name: Run issue webhook FactoryTask
+      env:
+        FACTORY_REPOSITORY: ${{ github.event.repository.full_name }}
+        ISSUE_NUMBER: ${{ github.event.issue.number }}
+      run: |
+        TASK_REPOSITORY="$(printf '%s' "${FACTORY_REPOSITORY}" | tr '[:upper:]/_' '[:lower:]--')"
+        TASK_NAME="github-${TASK_REPOSITORY}-${ISSUE_NUMBER}"
+
+        go run ./factory/cmd/factory task webhook serve \
+          --addr 127.0.0.1:8080 \
+          --apply \
+          --repository "${FACTORY_REPOSITORY}" \
+          --trigger-action opened \
+          --trigger-action reopened \
+          --trigger-action labeled \
+          --require-label ai-factory \
+          --sandbox-template go-dev \
+          --agent-command 'cat >/tmp/ai-factory-agent-prompt.txt' \
+          --command "${FACTORY_COMMAND}" \
+          --change-request=false \
+          --reporting-mode "" \
+          > "${RUNNER_TEMP}/webhook.log" 2>&1 &
+        WEBHOOK_PID=$!
+        trap 'kill "${WEBHOOK_PID}" 2>/dev/null || true' EXIT
+
+        WEBHOOK_DELIVERED=false
+        for _ in $(seq 1 30); do
+          if curl -fsS -X POST http://127.0.0.1:8080/webhook/github \
+            -H 'Content-Type: application/json' \
+            --data-binary @"${GITHUB_EVENT_PATH}"; then
+            WEBHOOK_DELIVERED=true
+            break
+          fi
+          sleep 1
+        done
+        if [[ "${WEBHOOK_DELIVERED}" != "true" ]]; then
+          cat "${RUNNER_TEMP}/webhook.log"
+          exit 1
+        fi
+
+        kubectl get factorytask "${TASK_NAME}" -n default -o yaml
+        kubectl wait sandboxwarmpool go-dev -n default --for=jsonpath='{.status.readyReplicas}'=1 --timeout=180s
+        go run ./factory/cmd/factory task controller watch \
+          -n default \
+          --once \
+          --interval=1s \
+          --timeout=180s \
+          --create-change-request=false \
+          --report=false
+        kubectl wait factorytask "${TASK_NAME}" -n default --for=jsonpath='{.status.phase}'=Succeeded --timeout=60s
+
+    - name: Show FactoryTask status
+      if: always()
+      run: |
+        kubectl get factorytasks,sandboxclaims,sandboxwarmpools,pods -A || true
+        ISSUE_NUMBER="${{ github.event.issue.number }}"
+        TASK_REPOSITORY="$(printf '%s' "${{ github.event.repository.full_name }}" | tr '[:upper:]/_' '[:lower:]--')"
+        kubectl get factorytask "github-${TASK_REPOSITORY}-${ISSUE_NUMBER}" -n default -o yaml || true
