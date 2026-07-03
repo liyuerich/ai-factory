@@ -113,6 +113,8 @@ type ChangeRequestSpec struct {
 	Title         string `yaml:"title,omitempty"`
 	Body          string `yaml:"body,omitempty"`
 	RemoteName    string `yaml:"remoteName,omitempty"`
+	AuthTokenEnv  string `yaml:"authTokenEnv,omitempty"`
+	AuthUsername  string `yaml:"authUsername,omitempty"`
 }
 
 // ReportingSpec describes how execution results should be reported.
@@ -211,7 +213,28 @@ func (s ChangeRequestSpec) validate() []error {
 	if strings.TrimSpace(s.BranchName) != "" && strings.TrimSpace(s.BranchPrefix) != "" {
 		errs = append(errs, errors.New("spec.changeRequest.branchName and spec.changeRequest.branchPrefix are mutually exclusive"))
 	}
+	if strings.TrimSpace(s.AuthTokenEnv) != "" && !isShellEnvName(s.AuthTokenEnv) {
+		errs = append(errs, errors.New("spec.changeRequest.authTokenEnv must be a valid shell environment variable name"))
+	}
 	return errs
+}
+
+func isShellEnvName(value string) bool {
+	if value == "" {
+		return false
+	}
+	for i, r := range value {
+		if i == 0 {
+			if r != '_' && (r < 'A' || r > 'Z') && (r < 'a' || r > 'z') {
+				return false
+			}
+			continue
+		}
+		if r != '_' && (r < 'A' || r > 'Z') && (r < 'a' || r > 'z') && (r < '0' || r > '9') {
+			return false
+		}
+	}
+	return true
 }
 
 func (s SourceSpec) validate() []error {

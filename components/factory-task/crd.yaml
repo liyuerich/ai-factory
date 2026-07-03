@@ -134,6 +134,10 @@ spec:
                     type: string
                   remoteName:
                     type: string
+                  authTokenEnv:
+                    type: string
+                  authUsername:
+                    type: string
               reporting:
                 type: object
                 properties:

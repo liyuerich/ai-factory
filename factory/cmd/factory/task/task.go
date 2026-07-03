@@ -205,6 +205,10 @@ var changeRequestCreateCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		if result.AlreadyExists {
+			fmt.Fprintln(cmd.OutOrStdout(), "--- PASS: change-request already exists")
+			return nil
+		}
 		fmt.Fprintf(cmd.OutOrStdout(), "--- PASS: change-request %s\n", result.URL)
 		return nil
 	},
@@ -667,7 +671,7 @@ func executeTask(out io.Writer, task *taskpkg.FactoryTask, taskData []byte, appl
 		return err
 	}
 	resultMessage := "FactoryTask completed successfully"
-	resultURL, err := createTaskChangeRequest(task, changeRequestEnabled(controllerName))
+	resultURL, changeRequestAlreadyExists, err := createTaskChangeRequest(task, changeRequestEnabled(controllerName))
 	if err != nil {
 		_ = patchTaskStatus(namespace, task.Metadata.Name, taskpkg.StatusPatchOptions{
 			Phase:            taskpkg.PhaseFailed,
@@ -679,7 +683,18 @@ func executeTask(out io.Writer, task *taskpkg.FactoryTask, taskData []byte, appl
 		reportTaskResult(out, task, taskpkg.PhaseFailed, fmt.Sprintf("Change request creation failed: %v", err), reportingEnabled(controllerName))
 		return err
 	}
-	if resultURL != "" {
+	if changeRequestAlreadyExists {
+		resultMessage = "FactoryTask completed successfully\n\nChange request already exists."
+		if err := patchTaskStatus(namespace, task.Metadata.Name, taskpkg.StatusPatchOptions{
+			Phase:            taskpkg.PhaseSucceeded,
+			Reason:           "ChangeRequestAlreadyExists",
+			Message:          "Change request already exists",
+			SandboxClaimName: claim,
+			SandboxName:      sandboxName,
+		}); err != nil {
+			return err
+		}
+	} else if resultURL != "" {
 		resultMessage = fmt.Sprintf("FactoryTask completed successfully\n\nChange request: %s", resultURL)
 		if err := patchTaskStatus(namespace, task.Metadata.Name, taskpkg.StatusPatchOptions{
 			Phase:            taskpkg.PhaseSucceeded,
@@ -719,15 +734,18 @@ func changeRequestEnabled(controllerName string) bool {
 	}
 }
 
-func createTaskChangeRequest(task *taskpkg.FactoryTask, enabled bool) (string, error) {
+func createTaskChangeRequest(task *taskpkg.FactoryTask, enabled bool) (string, bool, error) {
 	if !enabled || !task.Spec.ChangeRequest.Enabled {
-		return "", nil
+		return "", false, nil
 	}
 	result, err := taskpkg.CreateChangeRequest(context.Background(), task, taskpkg.ChangeRequestOptions{})
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
-	return result.URL, nil
+	if result.AlreadyExists {
+		return "", true, nil
+	}
+	return result.URL, false, nil
 }
 
 func reportTaskResult(out io.Writer, task *taskpkg.FactoryTask, phase, message string, enabled bool) {

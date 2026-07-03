@@ -16,6 +16,7 @@ package task
 
 import (
 	"fmt"
+	"net/url"
 	"strings"
 )
 
@@ -28,6 +29,8 @@ type ExecutionPlan struct {
 	BaseRef         string
 	ChangeBranch    string
 	TargetBranch    string
+	GitAuthTokenEnv string
+	GitAuthUsername string
 	AgentName       string
 	SandboxTemplate string
 	SandboxClaim    string
@@ -53,7 +56,7 @@ func BuildExecutionPlan(task *FactoryTask) (*ExecutionPlan, error) {
 	if err != nil {
 		return nil, err
 	}
-	changeBranch, targetBranch, remoteName, commitMessage, authorName, authorEmail := changeRequestDefaults(task)
+	changeBranch, targetBranch, remoteName, commitMessage, authorName, authorEmail, authTokenEnv, authUsername := changeRequestDefaults(task)
 
 	claimName := task.Spec.Sandbox.ClaimName
 	if claimName == "" {
@@ -73,6 +76,8 @@ func BuildExecutionPlan(task *FactoryTask) (*ExecutionPlan, error) {
 		BaseRef:         task.Spec.Source.BaseRef,
 		ChangeBranch:    changeBranch,
 		TargetBranch:    targetBranch,
+		GitAuthTokenEnv: authTokenEnv,
+		GitAuthUsername: authUsername,
 		AgentName:       task.Spec.Agent.Name,
 		SandboxTemplate: task.Spec.Sandbox.TemplateRef,
 		SandboxClaim:    claimName,
@@ -91,6 +96,16 @@ func BuildExecutionPlan(task *FactoryTask) (*ExecutionPlan, error) {
 	}
 
 	if task.Spec.ChangeRequest.Enabled {
+		host, err := cloneHost(cloneURL)
+		if err != nil {
+			return nil, err
+		}
+		plan.Steps = append([]ExecutionStep{
+			{
+				Name:    "configure git credentials",
+				Command: []string{"/bin/sh", "-lc", configureGitCredentialsScript(host, authTokenEnv, authUsername)},
+			},
+		}, plan.Steps...)
 		plan.Steps = append(plan.Steps, ExecutionStep{
 			Name:    "create change branch",
 			Command: []string{"git", "-C", workDir, "checkout", "-B", changeBranch},
@@ -120,7 +135,7 @@ func BuildExecutionPlan(task *FactoryTask) (*ExecutionPlan, error) {
 	return plan, nil
 }
 
-func changeRequestDefaults(task *FactoryTask) (string, string, string, string, string, string) {
+func changeRequestDefaults(task *FactoryTask) (string, string, string, string, string, string, string, string) {
 	spec := task.Spec.ChangeRequest
 	targetBranch := spec.TargetBranch
 	if targetBranch == "" {
@@ -150,7 +165,25 @@ func changeRequestDefaults(task *FactoryTask) (string, string, string, string, s
 	if authorEmail == "" {
 		authorEmail = "ai-factory@example.invalid"
 	}
-	return branchName, targetBranch, remoteName, commitMessage, authorName, authorEmail
+	authTokenEnv := spec.AuthTokenEnv
+	if authTokenEnv == "" {
+		switch task.Spec.Source.Provider {
+		case ProviderGitLab:
+			authTokenEnv = "GITLAB_TOKEN"
+		default:
+			authTokenEnv = "GITHUB_TOKEN"
+		}
+	}
+	authUsername := spec.AuthUsername
+	if authUsername == "" {
+		switch task.Spec.Source.Provider {
+		case ProviderGitLab:
+			authUsername = "oauth2"
+		default:
+			authUsername = "x-access-token"
+		}
+	}
+	return branchName, targetBranch, remoteName, commitMessage, authorName, authorEmail, authTokenEnv, authUsername
 }
 
 func commitChangesScript(workDir, commitMessage, authorName, authorEmail string) string {
@@ -159,6 +192,42 @@ func commitChangesScript(workDir, commitMessage, authorName, authorEmail string)
 
 func pushChangeBranchScript(workDir, remoteName, branchName, targetBranch string) string {
 	return fmt.Sprintf("cd %s && if [ \"$(git rev-parse HEAD)\" = \"$(git rev-parse %s)\" ]; then echo 'No change branch push needed'; else git push -u %s %s; fi", shellQuote(workDir), shellQuote(targetBranch), shellQuote(remoteName), shellQuote(branchName))
+}
+
+func configureGitCredentialsScript(host, tokenEnv, username string) string {
+	return fmt.Sprintf(`set -eu
+TOKEN_VALUE=$(printenv %s || true)
+if [ -z "$TOKEN_VALUE" ]; then
+  echo "%s is required in the sandbox environment for git clone/push" >&2
+  exit 1
+fi
+mkdir -p "$HOME"
+HELPER="$HOME/.git-credential-ai-factory"
+cat > "$HELPER" <<'EOF'
+#!/bin/sh
+case "$1" in
+get)
+  printf 'username=%%s\n' %s
+  printf 'password=%%s\n' "$(printenv %s)"
+  ;;
+esac
+EOF
+chmod 700 "$HELPER"
+git config --global %s "$HELPER"`,
+		shellQuote(tokenEnv),
+		tokenEnv,
+		shellQuote(username),
+		tokenEnv,
+		shellQuote(fmt.Sprintf("credential.https://%s.helper", host)),
+	)
+}
+
+func cloneHost(cloneURL string) (string, error) {
+	u, err := url.Parse(cloneURL)
+	if err != nil || u.Host == "" {
+		return "", fmt.Errorf("clone URL must be absolute to configure git credentials: %q", cloneURL)
+	}
+	return u.Host, nil
 }
 
 func shellQuote(value string) string {

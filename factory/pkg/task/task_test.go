@@ -232,21 +232,70 @@ spec:
 	if plan.TargetBranch != "main" {
 		t.Fatalf("TargetBranch = %q", plan.TargetBranch)
 	}
-	if got, want := len(plan.Steps), 6; got != want {
+	if plan.GitAuthTokenEnv != "GITHUB_TOKEN" {
+		t.Fatalf("GitAuthTokenEnv = %q", plan.GitAuthTokenEnv)
+	}
+	if got, want := len(plan.Steps), 7; got != want {
 		t.Fatalf("len(Steps) = %d, want %d", got, want)
 	}
 	names := make([]string, 0, len(plan.Steps))
 	for _, step := range plan.Steps {
 		names = append(names, step.Name)
 	}
-	wantNames := []string{"clone repository", "checkout base ref", "create change branch", "run command 1", "commit changes", "push change branch"}
+	wantNames := []string{"configure git credentials", "clone repository", "checkout base ref", "create change branch", "run command 1", "commit changes", "push change branch"}
 	if strings.Join(names, ",") != strings.Join(wantNames, ",") {
 		t.Fatalf("step names = %#v", names)
 	}
-	commitStep := plan.Steps[4]
+	authCommand := strings.Join(plan.Steps[0].Command, " ")
+	if !strings.Contains(authCommand, "GITHUB_TOKEN is required in the sandbox environment for git clone/push") {
+		t.Fatalf("auth command = %#v", plan.Steps[0].Command)
+	}
+	commitStep := plan.Steps[5]
 	commitCommand := strings.Join(commitStep.Command, " ")
 	if !strings.Contains(commitCommand, "git -c user.name='ai-factory' -c user.email='ai-factory@example.invalid' commit -m 'fix docs from task'") {
 		t.Fatalf("commit command = %#v", commitStep.Command)
+	}
+}
+
+func TestBuildExecutionPlanWithGitLabChangeRequestAuthDefaults(t *testing.T) {
+	task, err := Parse([]byte(`
+apiVersion: factory.ai.gke.io/v1alpha1
+kind: FactoryTask
+metadata:
+  name: fix-docs
+spec:
+  source:
+    provider: gitlab
+    host: gitlab.example.com
+    repository: platform/ai/ai-factory
+    baseRef: main
+  agent:
+    name: builder
+  sandbox:
+    templateRef: go-dev
+  work:
+    commands:
+    - go test ./...
+  changeRequest:
+    enabled: true
+`))
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+
+	plan, err := BuildExecutionPlan(task)
+	if err != nil {
+		t.Fatalf("BuildExecutionPlan() error = %v", err)
+	}
+	if plan.GitAuthTokenEnv != "GITLAB_TOKEN" {
+		t.Fatalf("GitAuthTokenEnv = %q", plan.GitAuthTokenEnv)
+	}
+	if plan.GitAuthUsername != "oauth2" {
+		t.Fatalf("GitAuthUsername = %q", plan.GitAuthUsername)
+	}
+	authCommand := strings.Join(plan.Steps[0].Command, " ")
+	if !strings.Contains(authCommand, "credential.https://gitlab.example.com.helper") {
+		t.Fatalf("auth command = %#v", plan.Steps[0].Command)
 	}
 }
 
@@ -278,6 +327,36 @@ spec:
 	}
 	if !strings.Contains(err.Error(), "spec.changeRequest.branchName") {
 		t.Fatalf("error = %v, want changeRequest validation error", err)
+	}
+}
+
+func TestParseRejectsInvalidChangeRequestAuthTokenEnv(t *testing.T) {
+	_, err := Parse([]byte(`
+apiVersion: factory.ai.gke.io/v1alpha1
+kind: FactoryTask
+metadata:
+  name: bad-change-request-auth
+spec:
+  source:
+    provider: github
+    repository: liyuerich/ai-factory
+    baseRef: main
+  agent:
+    name: builder
+  sandbox:
+    templateRef: go-dev
+  work:
+    commands:
+    - go test ./...
+  changeRequest:
+    enabled: true
+    authTokenEnv: 1BAD
+`))
+	if err == nil {
+		t.Fatal("Parse() error = nil, want authTokenEnv validation error")
+	}
+	if !strings.Contains(err.Error(), "spec.changeRequest.authTokenEnv") {
+		t.Fatalf("error = %v, want authTokenEnv validation error", err)
 	}
 }
 
@@ -328,6 +407,51 @@ spec:
 	}
 	if !strings.Contains(string(data), "kind: SandboxClaim") {
 		t.Fatalf("SandboxClaimYAML() = %s", data)
+	}
+}
+
+func TestReconcileInjectsGitAuthTokenEnv(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "test-token")
+	task, err := Parse([]byte(`
+apiVersion: factory.ai.gke.io/v1alpha1
+kind: FactoryTask
+metadata:
+  name: fix-docs
+  namespace: factory-system
+spec:
+  source:
+    provider: github
+    repository: liyuerich/ai-factory
+    baseRef: main
+  agent:
+    name: builder
+  sandbox:
+    templateRef: go-dev
+    containerName: dev
+  work:
+    commands:
+    - go test ./...
+  changeRequest:
+    enabled: true
+`))
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+
+	output, err := Reconcile(task)
+	if err != nil {
+		t.Fatalf("Reconcile() error = %v", err)
+	}
+	envs, ok := output.SandboxClaim.Spec["env"].([]interface{})
+	if !ok || len(envs) != 1 {
+		t.Fatalf("env = %#v", output.SandboxClaim.Spec["env"])
+	}
+	env, ok := envs[0].(map[string]interface{})
+	if !ok {
+		t.Fatalf("env[0] = %#v", envs[0])
+	}
+	if env["name"] != "GITHUB_TOKEN" || env["value"] != "test-token" || env["containerName"] != "dev" {
+		t.Fatalf("env[0] = %#v", env)
 	}
 }
 

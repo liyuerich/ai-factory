@@ -41,6 +41,8 @@ installer without those values leaves any existing secret untouched.
 | `GITHUB_TOKEN` | empty | Token used for GitHub issue comments and pull requests. |
 | `GITLAB_TOKEN` | empty | Token used for GitLab issue comments and merge requests. |
 | `WEBHOOK_SECRET` | empty | GitHub webhook secret or GitLab webhook token. |
+| `WEBHOOK_INGRESS_HOST` | empty | Optional host for creating a webhook `Ingress`. |
+| `WEBHOOK_INGRESS_CLASS` | empty | Optional ingress class name when `WEBHOOK_INGRESS_HOST` is set. |
 
 ## Webhook endpoints
 
@@ -59,6 +61,62 @@ Use these paths in provider webhook settings:
 
 GitHub should send issue events with `X-Hub-Signature-256`. GitLab should send
 issue events with `X-Gitlab-Token`.
+
+Set `WEBHOOK_INGRESS_HOST` to expose the webhook through an Ingress:
+
+```bash
+FACTORY_IMAGE=registry.example.com/ai-factory/factory:latest \
+INSTALL_FACTORY_TASK_RUNTIME=true \
+WEBHOOK_INGRESS_HOST=ai-factory.example.com \
+WEBHOOK_INGRESS_CLASS=nginx \
+components/factory-task/install
+```
+
+## End-to-end issue validation
+
+After the runtime is installed and reachable through either port-forward or
+Ingress:
+
+1. Create a GitHub or GitLab issue in a test repository.
+2. Add the configured trigger label. The default label is `ai-factory`.
+3. Confirm the provider webhook delivery returns `2xx`.
+4. Watch the generated task:
+
+```bash
+kubectl get factorytasks -A -w
+```
+
+5. Confirm the task reaches `Succeeded`, posts an issue comment, pushes the
+   change branch, and creates a PR/MR. If the PR/MR already exists, the
+   controller records `ChangeRequestAlreadyExists` and keeps the task
+   successful.
+
+For a local webhook test without provider delivery, port-forward the service and
+send one of the example payloads:
+
+```bash
+kubectl -n factory-system port-forward svc/factory-task-webhook 8080:80
+curl -X POST http://127.0.0.1:8080/webhook/github \
+  -H 'Content-Type: application/json' \
+  -H 'X-GitHub-Event: issues' \
+  --data-binary @examples/webhook-github-issue.json
+```
+
+## Sandbox git authentication
+
+For tasks with `spec.changeRequest.enabled=true`, the generated execution plan
+configures a git credential helper inside the sandbox before cloning. By
+default it expects `GITHUB_TOKEN` for GitHub and `GITLAB_TOKEN` for GitLab.
+Override those names with `spec.changeRequest.authTokenEnv`.
+
+The runtime controller reads the matching token from its own environment and
+injects it into the generated `SandboxClaim` `spec.env`. The target
+`SandboxTemplate` must allow environment-variable injection with
+`envVarsInjectionPolicy: Allowed` or `Overrides`.
+
+`SandboxClaim` currently supports literal env values rather than
+`secretKeyRef`, so keep access to `SandboxClaim` resources restricted to the
+FactoryTask controller and trusted operators.
 
 ## Permissions
 
