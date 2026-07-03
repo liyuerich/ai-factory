@@ -40,7 +40,7 @@ jobs:
 
     env:
       KIND_CLUSTER_NAME: ai-factory-ci
-      AGENT_SANDBOX_SRC: ${{ runner.temp }}/agent-sandbox
+      AGENT_SANDBOX_SRC: /tmp/agent-sandbox
       IMAGE_PREFIX: ai-factory
       IMAGE_TAG: ci
 
