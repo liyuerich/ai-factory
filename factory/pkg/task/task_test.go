@@ -252,6 +252,9 @@ spec:
 	}
 	commitStep := plan.Steps[5]
 	commitCommand := strings.Join(commitStep.Command, " ")
+	if !strings.Contains(commitCommand, "rm -f .ai-factory/agent-prompt.md .ai-factory/task-instructions.md") {
+		t.Fatalf("commit command should remove runtime prompt files before staging, got %#v", commitStep.Command)
+	}
 	if !strings.Contains(commitCommand, "git add -A && if git diff --cached --quiet") {
 		t.Fatalf("commit command should stage new files before checking for changes, got %#v", commitStep.Command)
 	}

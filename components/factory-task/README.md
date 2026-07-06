@@ -128,6 +128,14 @@ configure an `AI_FACTORY_GITHUB_TOKEN` repository secret with `contents:write`
 and `pull_requests:write` permissions. Issues without `ai-factory-smoke` never
 enable branch, push, or PR creation in this workflow.
 
+Use `ai-factory-run` for real issue-driven tasks. That label enables branch,
+commit, push, and PR creation without the smoke file. The workflow runs the
+issue instructions through `AI_FACTORY_RUN_AGENT_COMMAND`, defaulting to
+`gemini --yolo`, then runs `AI_FACTORY_RUN_VALIDATION_COMMAND`, defaulting to
+`go test ./...`. Runtime prompt files under `.ai-factory/agent-prompt.md` and
+`.ai-factory/task-instructions.md` are removed before committing so they do not
+pollute generated PRs.
+
 ## Agent runner
 
 Webhook-generated tasks now use the issue title/body as
