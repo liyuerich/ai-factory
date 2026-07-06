@@ -252,6 +252,9 @@ spec:
 	}
 	commitStep := plan.Steps[5]
 	commitCommand := strings.Join(commitStep.Command, " ")
+	if !strings.Contains(commitCommand, "git add -A && if git diff --cached --quiet") {
+		t.Fatalf("commit command should stage new files before checking for changes, got %#v", commitStep.Command)
+	}
 	if !strings.Contains(commitCommand, "git -c user.name='ai-factory' -c user.email='ai-factory@example.invalid' commit -m 'fix docs from task'") {
 		t.Fatalf("commit command = %#v", commitStep.Command)
 	}

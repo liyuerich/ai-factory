@@ -203,7 +203,7 @@ func changeRequestDefaults(task *FactoryTask) (string, string, string, string, s
 }
 
 func commitChangesScript(workDir, commitMessage, authorName, authorEmail string) string {
-	return fmt.Sprintf("cd %s && if git diff --quiet && git diff --cached --quiet; then echo 'No changes to commit'; else git add -A && git -c user.name=%s -c user.email=%s commit -m %s; fi", shellQuote(workDir), shellQuote(authorName), shellQuote(authorEmail), shellQuote(commitMessage))
+	return fmt.Sprintf("cd %s && git add -A && if git diff --cached --quiet; then echo 'No changes to commit'; else git -c user.name=%s -c user.email=%s commit -m %s; fi", shellQuote(workDir), shellQuote(authorName), shellQuote(authorEmail), shellQuote(commitMessage))
 }
 
 func pushChangeBranchScript(workDir, remoteName, branchName, targetBranch string) string {
