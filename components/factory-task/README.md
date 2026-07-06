@@ -122,8 +122,11 @@ with a real `AGENT_COMMAND` and provider tokens for production PR/MR creation.
 Add the additional `ai-factory-smoke` label to enable the workflow's safe
 change-request path. In that mode the task writes a small file under
 `.ai-factory/smoke/`, commits it on a generated branch, pushes the branch with
-the workflow `GITHUB_TOKEN`, and creates a GitHub pull request. Issues without
-`ai-factory-smoke` never enable branch, push, or PR creation in this workflow.
+`AI_FACTORY_GITHUB_TOKEN`, and creates a GitHub pull request. If the repository
+does not allow the default Actions `GITHUB_TOKEN` to create pull requests,
+configure an `AI_FACTORY_GITHUB_TOKEN` repository secret with `contents:write`
+and `pull_requests:write` permissions. Issues without `ai-factory-smoke` never
+enable branch, push, or PR creation in this workflow.
 
 ## Agent runner
 

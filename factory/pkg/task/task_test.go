@@ -258,6 +258,10 @@ spec:
 	if !strings.Contains(commitCommand, "git -c user.name='ai-factory' -c user.email='ai-factory@example.invalid' commit -m 'fix docs from task'") {
 		t.Fatalf("commit command = %#v", commitStep.Command)
 	}
+	pushCommand := strings.Join(plan.Steps[6].Command, " ")
+	if !strings.Contains(pushCommand, "git push --force-with-lease -u 'origin' 'ai-factory/fix-docs'") {
+		t.Fatalf("push command = %#v", plan.Steps[6].Command)
+	}
 }
 
 func TestBuildExecutionPlanWithGitLabChangeRequestAuthDefaults(t *testing.T) {

@@ -65,8 +65,15 @@ func (e *ChangeRequestError) Error() string {
 	if e == nil {
 		return ""
 	}
+	message := changeRequestErrorMessage(e.Body)
 	if e.Reason != "" {
+		if message != "" {
+			return fmt.Sprintf("post %s change request: %s: %s: %s", e.Provider, e.Status, e.Reason, message)
+		}
 		return fmt.Sprintf("post %s change request: %s: %s", e.Provider, e.Status, e.Reason)
+	}
+	if message != "" {
+		return fmt.Sprintf("post %s change request: unexpected status %s: %s", e.Provider, e.Status, message)
 	}
 	return fmt.Sprintf("post %s change request: unexpected status %s", e.Provider, e.Status)
 }
@@ -182,12 +189,9 @@ func classifyChangeRequestError(provider string, statusCode int, status, body st
 }
 
 func buildGitHubPullRequest(task *FactoryTask, opts ChangeRequestOptions, head, base, title, body string) (*ChangeRequest, error) {
-	token := opts.Token
+	token := changeRequestToken(task, opts, "GITHUB_TOKEN")
 	if token == "" {
-		token = os.Getenv("GITHUB_TOKEN")
-	}
-	if token == "" {
-		return nil, errors.New("GITHUB_TOKEN is required to create GitHub pull requests")
+		return nil, errors.New(changeRequestTokenRequiredMessage(task, "GITHUB_TOKEN", "GitHub pull requests"))
 	}
 	apiBase := strings.TrimRight(opts.APIBase, "/")
 	if apiBase == "" {
@@ -220,12 +224,9 @@ func buildGitHubPullRequest(task *FactoryTask, opts ChangeRequestOptions, head, 
 }
 
 func buildGitLabMergeRequest(task *FactoryTask, opts ChangeRequestOptions, sourceBranch, targetBranch, title, body string) (*ChangeRequest, error) {
-	token := opts.Token
+	token := changeRequestToken(task, opts, "GITLAB_TOKEN")
 	if token == "" {
-		token = os.Getenv("GITLAB_TOKEN")
-	}
-	if token == "" {
-		return nil, errors.New("GITLAB_TOKEN is required to create GitLab merge requests")
+		return nil, errors.New(changeRequestTokenRequiredMessage(task, "GITLAB_TOKEN", "GitLab merge requests"))
 	}
 	apiBase := strings.TrimRight(opts.APIBase, "/")
 	if apiBase == "" {
@@ -254,6 +255,37 @@ func buildGitLabMergeRequest(task *FactoryTask, opts ChangeRequestOptions, sourc
 		},
 		Body: payload,
 	}, nil
+}
+
+func changeRequestToken(task *FactoryTask, opts ChangeRequestOptions, defaultEnv string) string {
+	if opts.Token != "" {
+		return opts.Token
+	}
+	if envName := strings.TrimSpace(task.Spec.ChangeRequest.AuthTokenEnv); envName != "" {
+		if token := os.Getenv(envName); token != "" {
+			return token
+		}
+	}
+	return os.Getenv(defaultEnv)
+}
+
+func changeRequestTokenRequiredMessage(task *FactoryTask, defaultEnv, target string) string {
+	if envName := strings.TrimSpace(task.Spec.ChangeRequest.AuthTokenEnv); envName != "" {
+		return fmt.Sprintf("%s or %s is required to create %s", envName, defaultEnv, target)
+	}
+	return fmt.Sprintf("%s is required to create %s", defaultEnv, target)
+}
+
+func changeRequestErrorMessage(body string) string {
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(body), &payload); err != nil {
+		return ""
+	}
+	message, _ := payload["message"].(string)
+	if len(message) > 300 {
+		return message[:300]
+	}
+	return message
 }
 
 func decodeChangeRequestURL(provider string, resp *http.Response) (string, error) {

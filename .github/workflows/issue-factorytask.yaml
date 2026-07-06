@@ -110,6 +110,7 @@ jobs:
         FACTORY_REPOSITORY: ${{ github.event.repository.full_name }}
         ISSUE_NUMBER: ${{ github.event.issue.number }}
         GITHUB_TOKEN: ${{ github.token }}
+        AI_FACTORY_GITHUB_TOKEN: ${{ secrets.AI_FACTORY_GITHUB_TOKEN || github.token }}
       run: |
         TASK_REPOSITORY="$(printf '%s' "${FACTORY_REPOSITORY}" | tr '[:upper:]/_' '[:lower:]--')"
         TASK_NAME="github-${TASK_REPOSITORY}-${ISSUE_NUMBER}"
@@ -132,6 +133,7 @@ jobs:
           --agent-command 'cat >/tmp/ai-factory-agent-prompt.txt' \
           --command "${TASK_COMMAND}" \
           --change-request="${CHANGE_REQUEST}" \
+          --change-request-auth-token-env AI_FACTORY_GITHUB_TOKEN \
           --reporting-mode "" \
           > "${RUNNER_TEMP}/webhook.log" 2>&1 &
         WEBHOOK_PID=$!

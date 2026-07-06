@@ -65,11 +65,12 @@ func TestFactoryTaskFromGitHubIssueWebhook(t *testing.T) {
 
 func TestFactoryTaskFromGitHubIssueWebhookWithChangeRequest(t *testing.T) {
 	task, err := FactoryTaskFromIssueWebhook([]byte(githubIssuePayload), IssueWebhookOptions{
-		Provider:             ProviderGitHub,
-		AgentName:            "builder",
-		AgentCommand:         "codex exec --full-auto",
-		SandboxTemplateRef:   "go-dev",
-		ChangeRequestEnabled: true,
+		Provider:                  ProviderGitHub,
+		AgentName:                 "builder",
+		AgentCommand:              "codex exec --full-auto",
+		SandboxTemplateRef:        "go-dev",
+		ChangeRequestEnabled:      true,
+		ChangeRequestAuthTokenEnv: "AI_FACTORY_GITHUB_TOKEN",
 	})
 	if err != nil {
 		t.Fatalf("FactoryTaskFromIssueWebhook() error = %v", err)
@@ -82,6 +83,9 @@ func TestFactoryTaskFromGitHubIssueWebhookWithChangeRequest(t *testing.T) {
 	}
 	if task.Spec.ChangeRequest.BranchPrefix != "factory-task" {
 		t.Fatalf("branchPrefix = %q", task.Spec.ChangeRequest.BranchPrefix)
+	}
+	if task.Spec.ChangeRequest.AuthTokenEnv != "AI_FACTORY_GITHUB_TOKEN" {
+		t.Fatalf("authTokenEnv = %q", task.Spec.ChangeRequest.AuthTokenEnv)
 	}
 	if !strings.Contains(task.Spec.ChangeRequest.CommitMessage, "Add webhook support") {
 		t.Fatalf("commitMessage = %q", task.Spec.ChangeRequest.CommitMessage)

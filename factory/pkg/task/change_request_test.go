@@ -52,6 +52,21 @@ func TestBuildGitHubPullRequest(t *testing.T) {
 	}
 }
 
+func TestBuildGitHubPullRequestUsesAuthTokenEnv(t *testing.T) {
+	t.Setenv("AI_FACTORY_GITHUB_TOKEN", "env-token")
+	task := mustChangeRequestTask(t, ProviderGitHub)
+	task.Spec.ChangeRequest.AuthTokenEnv = "AI_FACTORY_GITHUB_TOKEN"
+	req, err := BuildChangeRequest(task, ChangeRequestOptions{
+		APIBase: "https://api.github.test",
+	})
+	if err != nil {
+		t.Fatalf("BuildChangeRequest() error = %v", err)
+	}
+	if req.Headers["Authorization"] != "Bearer env-token" {
+		t.Fatalf("authorization = %q", req.Headers["Authorization"])
+	}
+}
+
 func TestBuildGitLabMergeRequest(t *testing.T) {
 	task := mustChangeRequestTask(t, ProviderGitLab)
 	req, err := BuildChangeRequest(task, ChangeRequestOptions{

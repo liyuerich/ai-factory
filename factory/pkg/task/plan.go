@@ -207,7 +207,7 @@ func commitChangesScript(workDir, commitMessage, authorName, authorEmail string)
 }
 
 func pushChangeBranchScript(workDir, remoteName, branchName, targetBranch string) string {
-	return fmt.Sprintf("cd %s && if [ \"$(git rev-parse HEAD)\" = \"$(git rev-parse %s)\" ]; then echo 'No change branch push needed'; else git push -u %s %s; fi", shellQuote(workDir), shellQuote(targetBranch), shellQuote(remoteName), shellQuote(branchName))
+	return fmt.Sprintf("cd %s && if [ \"$(git rev-parse HEAD)\" = \"$(git rev-parse %s)\" ]; then echo 'No change branch push needed'; else git push --force-with-lease -u %s %s; fi", shellQuote(workDir), shellQuote(targetBranch), shellQuote(remoteName), shellQuote(branchName))
 }
 
 func runAgentScript(workDir, instructions, promptRef, agentCommand string) string {

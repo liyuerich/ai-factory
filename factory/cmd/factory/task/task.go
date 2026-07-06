@@ -224,19 +224,20 @@ var webhookCmd = &cobra.Command{
 }
 
 var webhookOptions struct {
-	provider           string
-	namespace          string
-	agent              string
-	agentCommand       string
-	promptRef          string
-	sandboxTemplateRef string
-	containerName      string
-	reportingMode      string
-	command            []string
-	triggerAction      []string
-	requireLabel       []string
-	repository         []string
-	changeRequest      bool
+	provider                  string
+	namespace                 string
+	agent                     string
+	agentCommand              string
+	promptRef                 string
+	sandboxTemplateRef        string
+	containerName             string
+	reportingMode             string
+	command                   []string
+	triggerAction             []string
+	requireLabel              []string
+	repository                []string
+	changeRequest             bool
+	changeRequestAuthTokenEnv string
 }
 
 var webhookRenderCmd = &cobra.Command{
@@ -435,6 +436,7 @@ func init() {
 	webhookCmd.PersistentFlags().StringArrayVar(&webhookOptions.requireLabel, "require-label", nil, "issue label required to trigger a FactoryTask; can be repeated")
 	webhookCmd.PersistentFlags().StringArrayVar(&webhookOptions.repository, "repository", nil, "repository allowed to trigger FactoryTasks; can be repeated")
 	webhookCmd.PersistentFlags().BoolVar(&webhookOptions.changeRequest, "change-request", true, "enable branch, commit, push, and PR/MR creation for generated FactoryTasks")
+	webhookCmd.PersistentFlags().StringVar(&webhookOptions.changeRequestAuthTokenEnv, "change-request-auth-token-env", "", "environment variable name for git push and PR/MR creation token")
 	webhookRenderCmd.Flags().StringVar(&webhookOptions.provider, "provider", taskpkg.ProviderGitHub, "webhook provider: github or gitlab")
 	webhookServeCmd.Flags().StringVar(&webhookServeOptions.addr, "addr", ":8080", "listen address")
 	webhookServeCmd.Flags().StringVar(&webhookServeOptions.secret, "secret", "", "webhook secret for GitHub signatures or GitLab tokens")
@@ -487,19 +489,20 @@ func readPayload(path string) ([]byte, error) {
 
 func issueWebhookOptions() taskpkg.IssueWebhookOptions {
 	return taskpkg.IssueWebhookOptions{
-		Provider:             webhookOptions.provider,
-		Namespace:            webhookOptions.namespace,
-		AgentName:            webhookOptions.agent,
-		AgentCommand:         webhookOptions.agentCommand,
-		PromptRef:            webhookOptions.promptRef,
-		SandboxTemplateRef:   webhookOptions.sandboxTemplateRef,
-		ContainerName:        webhookOptions.containerName,
-		ReportingMode:        webhookOptions.reportingMode,
-		Commands:             webhookOptions.command,
-		TriggerActions:       webhookOptions.triggerAction,
-		RequiredLabels:       webhookOptions.requireLabel,
-		Repositories:         webhookOptions.repository,
-		ChangeRequestEnabled: webhookOptions.changeRequest,
+		Provider:                  webhookOptions.provider,
+		Namespace:                 webhookOptions.namespace,
+		AgentName:                 webhookOptions.agent,
+		AgentCommand:              webhookOptions.agentCommand,
+		PromptRef:                 webhookOptions.promptRef,
+		SandboxTemplateRef:        webhookOptions.sandboxTemplateRef,
+		ContainerName:             webhookOptions.containerName,
+		ReportingMode:             webhookOptions.reportingMode,
+		Commands:                  webhookOptions.command,
+		TriggerActions:            webhookOptions.triggerAction,
+		RequiredLabels:            webhookOptions.requireLabel,
+		Repositories:              webhookOptions.repository,
+		ChangeRequestEnabled:      webhookOptions.changeRequest,
+		ChangeRequestAuthTokenEnv: webhookOptions.changeRequestAuthTokenEnv,
 	}
 }
 
