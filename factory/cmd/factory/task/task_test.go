@@ -148,19 +148,20 @@ func TestIssueWebhookHandlerIgnoresMissingRequiredLabel(t *testing.T) {
 	}()
 
 	webhookOptions = struct {
-		provider           string
-		namespace          string
-		agent              string
-		agentCommand       string
-		promptRef          string
-		sandboxTemplateRef string
-		containerName      string
-		reportingMode      string
-		command            []string
-		triggerAction      []string
-		requireLabel       []string
-		repository         []string
-		changeRequest      bool
+		provider                  string
+		namespace                 string
+		agent                     string
+		agentCommand              string
+		promptRef                 string
+		sandboxTemplateRef        string
+		containerName             string
+		reportingMode             string
+		command                   []string
+		triggerAction             []string
+		requireLabel              []string
+		repository                []string
+		changeRequest             bool
+		changeRequestAuthTokenEnv string
 	}{
 		namespace:          "factory-system",
 		agent:              "builder",
