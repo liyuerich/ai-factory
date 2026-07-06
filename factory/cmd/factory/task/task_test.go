@@ -152,6 +152,7 @@ func TestIssueWebhookHandlerIgnoresMissingRequiredLabel(t *testing.T) {
 		namespace                 string
 		agent                     string
 		agentCommand              string
+		agentEnv                  []string
 		promptRef                 string
 		sandboxTemplateRef        string
 		containerName             string

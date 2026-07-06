@@ -228,6 +228,7 @@ var webhookOptions struct {
 	namespace                 string
 	agent                     string
 	agentCommand              string
+	agentEnv                  []string
 	promptRef                 string
 	sandboxTemplateRef        string
 	containerName             string
@@ -427,6 +428,7 @@ func init() {
 	webhookCmd.PersistentFlags().StringVarP(&webhookOptions.namespace, "namespace", "n", "default", "FactoryTask namespace")
 	webhookCmd.PersistentFlags().StringVar(&webhookOptions.agent, "agent", "builder", "agent name for generated FactoryTasks")
 	webhookCmd.PersistentFlags().StringVar(&webhookOptions.agentCommand, "agent-command", "gemini --yolo", "agent runner command for generated FactoryTasks")
+	webhookCmd.PersistentFlags().StringArrayVar(&webhookOptions.agentEnv, "agent-env", nil, "environment variable to inject into the agent sandbox; can be repeated")
 	webhookCmd.PersistentFlags().StringVar(&webhookOptions.promptRef, "prompt-ref", "", "agent prompt reference")
 	webhookCmd.PersistentFlags().StringVar(&webhookOptions.sandboxTemplateRef, "sandbox-template", "go-dev", "sandbox template reference")
 	webhookCmd.PersistentFlags().StringVar(&webhookOptions.containerName, "container", "", "sandbox container name")
@@ -493,6 +495,7 @@ func issueWebhookOptions() taskpkg.IssueWebhookOptions {
 		Namespace:                 webhookOptions.namespace,
 		AgentName:                 webhookOptions.agent,
 		AgentCommand:              webhookOptions.agentCommand,
+		AgentEnv:                  webhookOptions.agentEnv,
 		PromptRef:                 webhookOptions.promptRef,
 		SandboxTemplateRef:        webhookOptions.sandboxTemplateRef,
 		ContainerName:             webhookOptions.containerName,

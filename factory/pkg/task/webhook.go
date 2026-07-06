@@ -40,6 +40,7 @@ type IssueWebhookOptions struct {
 	Namespace                 string
 	AgentName                 string
 	AgentCommand              string
+	AgentEnv                  []string
 	PromptRef                 string
 	SandboxTemplateRef        string
 	ContainerName             string
@@ -134,6 +135,7 @@ func FactoryTaskFromIssueWebhook(payload []byte, opts IssueWebhookOptions) (*Fac
 				Name:      agentName,
 				PromptRef: opts.PromptRef,
 				Command:   opts.AgentCommand,
+				Env:       opts.AgentEnv,
 			},
 			Sandbox: SandboxSpec{
 				TemplateRef:   sandboxTemplate,

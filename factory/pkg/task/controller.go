@@ -86,14 +86,12 @@ func Reconcile(task *FactoryTask) (*ReconcileOutput, error) {
 	}
 	if task.Spec.ChangeRequest.Enabled && plan.GitAuthTokenEnv != "" {
 		if token := os.Getenv(plan.GitAuthTokenEnv); token != "" {
-			env := map[string]interface{}{
-				"name":  plan.GitAuthTokenEnv,
-				"value": token,
-			}
-			if plan.ContainerName != "" {
-				env["containerName"] = plan.ContainerName
-			}
-			claim.Spec["env"] = []interface{}{env}
+			appendSandboxEnv(claim.Spec, plan.ContainerName, plan.GitAuthTokenEnv, token)
+		}
+	}
+	for _, envName := range task.Spec.Agent.Env {
+		if value := os.Getenv(envName); value != "" {
+			appendSandboxEnv(claim.Spec, plan.ContainerName, envName, value)
 		}
 	}
 
@@ -101,6 +99,18 @@ func Reconcile(task *FactoryTask) (*ReconcileOutput, error) {
 		Plan:         plan,
 		SandboxClaim: claim,
 	}, nil
+}
+
+func appendSandboxEnv(spec map[string]interface{}, containerName, name, value string) {
+	env := map[string]interface{}{
+		"name":  name,
+		"value": value,
+	}
+	if containerName != "" {
+		env["containerName"] = containerName
+	}
+	envs, _ := spec["env"].([]interface{})
+	spec["env"] = append(envs, env)
 }
 
 // SandboxClaimYAML renders the generated SandboxClaim manifest.

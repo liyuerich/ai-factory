@@ -37,7 +37,7 @@ jobs:
       IMAGE_PREFIX: ai-factory
       IMAGE_TAG: ci
       CODING_AGENT_IMAGE: ai-factory/coding-agent-sandbox:ci
-      AI_FACTORY_RUN_AGENT_COMMAND: ${{ vars.AI_FACTORY_RUN_AGENT_COMMAND || 'gemini --yolo' }}
+      AI_FACTORY_RUN_AGENT_COMMAND: ${{ vars.AI_FACTORY_RUN_AGENT_COMMAND || 'codex exec --sandbox workspace-write -' }}
       AI_FACTORY_RUN_VALIDATION_COMMAND: ${{ vars.AI_FACTORY_RUN_VALIDATION_COMMAND || 'go test ./...' }}
       FACTORY_SMOKE_COMMAND: test -s /tmp/ai-factory-agent-prompt.txt && test -f factory/pkg/task/controller.go && git --version && go version && node --version && python3 --version && gemini --version
 
@@ -67,6 +67,7 @@ jobs:
     - name: Build coding agent sandbox image
       run: |
         docker build \
+          --build-arg INSTALL_CODEX_CLI=true \
           -t "${CODING_AGENT_IMAGE}" \
           components/agent-sandbox-images/coding-agent
         kind load docker-image "${CODING_AGENT_IMAGE}" --name "${KIND_CLUSTER_NAME}"
@@ -113,11 +114,13 @@ jobs:
         ISSUE_NUMBER: ${{ github.event.issue.number }}
         GITHUB_TOKEN: ${{ github.token }}
         AI_FACTORY_GITHUB_TOKEN: ${{ secrets.AI_FACTORY_GITHUB_TOKEN || github.token }}
+        CODEX_API_KEY: ${{ secrets.CODEX_API_KEY }}
       run: |
         TASK_REPOSITORY="$(printf '%s' "${FACTORY_REPOSITORY}" | tr '[:upper:]/_' '[:lower:]--')"
         TASK_NAME="github-${TASK_REPOSITORY}-${ISSUE_NUMBER}"
         CHANGE_REQUEST=false
         AGENT_COMMAND="cat >/tmp/ai-factory-agent-prompt.txt"
+        AGENT_ENV_ARGS=()
         TASK_COMMAND="${FACTORY_SMOKE_COMMAND}"
         RESULT_EXPECTATION="FactoryTask to succeed"
         if jq -e '.issue.labels[]?.name == "ai-factory-smoke"' "${GITHUB_EVENT_PATH}" >/dev/null; then
@@ -126,7 +129,12 @@ jobs:
           RESULT_EXPECTATION="an ai-factory-smoke change request URL or an existing PR status"
         elif jq -e '.issue.labels[]?.name == "ai-factory-run"' "${GITHUB_EVENT_PATH}" >/dev/null; then
           CHANGE_REQUEST=true
+          if [[ -z "${CODEX_API_KEY}" ]]; then
+            echo "CODEX_API_KEY repository secret is required for ai-factory-run."
+            exit 1
+          fi
           AGENT_COMMAND="${AI_FACTORY_RUN_AGENT_COMMAND}"
+          AGENT_ENV_ARGS+=(--agent-env CODEX_API_KEY)
           TASK_COMMAND="${AI_FACTORY_RUN_VALIDATION_COMMAND}"
           RESULT_EXPECTATION="an ai-factory-run change request URL or an existing PR status"
         fi
@@ -141,6 +149,7 @@ jobs:
           --require-label ai-factory \
           --sandbox-template go-dev \
           --agent-command "${AGENT_COMMAND}" \
+          "${AGENT_ENV_ARGS[@]}" \
           --command "${TASK_COMMAND}" \
           --change-request="${CHANGE_REQUEST}" \
           --change-request-auth-token-env AI_FACTORY_GITHUB_TOKEN \

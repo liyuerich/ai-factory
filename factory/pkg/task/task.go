@@ -84,9 +84,10 @@ type TriggerSpec struct {
 
 // AgentSpec selects the agent persona and optional prompt/config reference.
 type AgentSpec struct {
-	Name      string `yaml:"name"`
-	PromptRef string `yaml:"promptRef,omitempty"`
-	Command   string `yaml:"command,omitempty"`
+	Name      string   `yaml:"name"`
+	PromptRef string   `yaml:"promptRef,omitempty"`
+	Command   string   `yaml:"command,omitempty"`
+	Env       []string `yaml:"env,omitempty"`
 }
 
 // SandboxSpec describes the sandbox that should execute the task.
@@ -185,6 +186,12 @@ func (s FactoryTaskSpec) validate() []error {
 	errs = append(errs, s.Source.validate()...)
 	if strings.TrimSpace(s.Agent.Name) == "" {
 		errs = append(errs, errors.New("spec.agent.name is required"))
+	}
+	for _, envName := range s.Agent.Env {
+		if !isShellEnvName(envName) {
+			errs = append(errs, errors.New("spec.agent.env entries must be valid shell environment variable names"))
+			break
+		}
 	}
 	if strings.TrimSpace(s.Sandbox.TemplateRef) == "" {
 		errs = append(errs, errors.New("spec.sandbox.templateRef is required"))

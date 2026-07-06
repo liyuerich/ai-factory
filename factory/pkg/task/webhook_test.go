@@ -68,6 +68,7 @@ func TestFactoryTaskFromGitHubIssueWebhookWithChangeRequest(t *testing.T) {
 		Provider:                  ProviderGitHub,
 		AgentName:                 "builder",
 		AgentCommand:              "codex exec --full-auto",
+		AgentEnv:                  []string{"CODEX_API_KEY"},
 		SandboxTemplateRef:        "go-dev",
 		ChangeRequestEnabled:      true,
 		ChangeRequestAuthTokenEnv: "AI_FACTORY_GITHUB_TOKEN",
@@ -77,6 +78,9 @@ func TestFactoryTaskFromGitHubIssueWebhookWithChangeRequest(t *testing.T) {
 	}
 	if task.Spec.Agent.Command != "codex exec --full-auto" {
 		t.Fatalf("agent.command = %q", task.Spec.Agent.Command)
+	}
+	if len(task.Spec.Agent.Env) != 1 || task.Spec.Agent.Env[0] != "CODEX_API_KEY" {
+		t.Fatalf("agent.env = %#v", task.Spec.Agent.Env)
 	}
 	if !task.Spec.ChangeRequest.Enabled {
 		t.Fatal("changeRequest.enabled = false")

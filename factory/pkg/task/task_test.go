@@ -419,6 +419,35 @@ spec:
 	}
 }
 
+func TestParseRejectsInvalidAgentEnv(t *testing.T) {
+	_, err := Parse([]byte(`
+apiVersion: factory.ai.gke.io/v1alpha1
+kind: FactoryTask
+metadata:
+  name: bad-agent-env
+spec:
+  source:
+    provider: github
+    repository: liyuerich/ai-factory
+    baseRef: main
+  agent:
+    name: builder
+    env:
+    - 1BAD
+  sandbox:
+    templateRef: go-dev
+  work:
+    commands:
+    - go test ./...
+`))
+	if err == nil {
+		t.Fatal("Parse() error = nil, want agent env validation error")
+	}
+	if !strings.Contains(err.Error(), "spec.agent.env") {
+		t.Fatalf("error = %v, want agent env validation error", err)
+	}
+}
+
 func TestReconcileBuildsSandboxClaim(t *testing.T) {
 	task, err := Parse([]byte(`
 apiVersion: factory.ai.gke.io/v1alpha1
@@ -471,6 +500,7 @@ spec:
 
 func TestReconcileInjectsGitAuthTokenEnv(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "test-token")
+	t.Setenv("CODEX_API_KEY", "codex-token")
 	task, err := Parse([]byte(`
 apiVersion: factory.ai.gke.io/v1alpha1
 kind: FactoryTask
@@ -484,6 +514,8 @@ spec:
     baseRef: main
   agent:
     name: builder
+    env:
+    - CODEX_API_KEY
   sandbox:
     templateRef: go-dev
     containerName: dev
@@ -502,15 +534,22 @@ spec:
 		t.Fatalf("Reconcile() error = %v", err)
 	}
 	envs, ok := output.SandboxClaim.Spec["env"].([]interface{})
-	if !ok || len(envs) != 1 {
+	if !ok || len(envs) != 2 {
 		t.Fatalf("env = %#v", output.SandboxClaim.Spec["env"])
 	}
-	env, ok := envs[0].(map[string]interface{})
-	if !ok {
-		t.Fatalf("env[0] = %#v", envs[0])
+	want := map[string]string{
+		"GITHUB_TOKEN":  "test-token",
+		"CODEX_API_KEY": "codex-token",
 	}
-	if env["name"] != "GITHUB_TOKEN" || env["value"] != "test-token" || env["containerName"] != "dev" {
-		t.Fatalf("env[0] = %#v", env)
+	for i, rawEnv := range envs {
+		env, ok := rawEnv.(map[string]interface{})
+		if !ok {
+			t.Fatalf("env[%d] = %#v", i, rawEnv)
+		}
+		name, _ := env["name"].(string)
+		if want[name] == "" || env["value"] != want[name] || env["containerName"] != "dev" {
+			t.Fatalf("env[%d] = %#v", i, env)
+		}
 	}
 }
 

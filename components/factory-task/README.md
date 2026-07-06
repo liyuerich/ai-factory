@@ -131,10 +131,11 @@ enable branch, push, or PR creation in this workflow.
 Use `ai-factory-run` for real issue-driven tasks. That label enables branch,
 commit, push, and PR creation without the smoke file. The workflow runs the
 issue instructions through `AI_FACTORY_RUN_AGENT_COMMAND`, defaulting to
-`gemini --yolo`, then runs `AI_FACTORY_RUN_VALIDATION_COMMAND`, defaulting to
-`go test ./...`. Runtime prompt files under `.ai-factory/agent-prompt.md` and
-`.ai-factory/task-instructions.md` are removed before committing so they do not
-pollute generated PRs.
+`codex exec --sandbox workspace-write -`, then runs
+`AI_FACTORY_RUN_VALIDATION_COMMAND`, defaulting to `go test ./...`. Configure a
+`CODEX_API_KEY` repository secret before using this path. Runtime prompt files
+under `.ai-factory/agent-prompt.md` and `.ai-factory/task-instructions.md` are
+removed before committing so they do not pollute generated PRs.
 
 ## Agent runner
 
