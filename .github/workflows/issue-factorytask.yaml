@@ -15,7 +15,9 @@
 name: Issue FactoryTask
 
 permissions:
-  contents: read
+  contents: write
+  issues: read
+  pull-requests: write
 
 on:
   issues:
@@ -107,9 +109,16 @@ jobs:
       env:
         FACTORY_REPOSITORY: ${{ github.event.repository.full_name }}
         ISSUE_NUMBER: ${{ github.event.issue.number }}
+        GITHUB_TOKEN: ${{ github.token }}
       run: |
         TASK_REPOSITORY="$(printf '%s' "${FACTORY_REPOSITORY}" | tr '[:upper:]/_' '[:lower:]--')"
         TASK_NAME="github-${TASK_REPOSITORY}-${ISSUE_NUMBER}"
+        CHANGE_REQUEST=false
+        TASK_COMMAND="${FACTORY_COMMAND}"
+        if jq -e '.issue.labels[]?.name == "ai-factory-smoke"' "${GITHUB_EVENT_PATH}" >/dev/null; then
+          CHANGE_REQUEST=true
+          TASK_COMMAND="mkdir -p .ai-factory/smoke && printf 'issue=%s\nrun=%s\n' '${ISSUE_NUMBER}' '${GITHUB_RUN_ID}' > .ai-factory/smoke/issue-${ISSUE_NUMBER}.txt && ${FACTORY_COMMAND}"
+        fi
 
         go run ./factory/cmd/factory task webhook serve \
           --addr 127.0.0.1:8080 \
@@ -121,8 +130,8 @@ jobs:
           --require-label ai-factory \
           --sandbox-template go-dev \
           --agent-command 'cat >/tmp/ai-factory-agent-prompt.txt' \
-          --command "${FACTORY_COMMAND}" \
-          --change-request=false \
+          --command "${TASK_COMMAND}" \
+          --change-request="${CHANGE_REQUEST}" \
           --reporting-mode "" \
           > "${RUNNER_TEMP}/webhook.log" 2>&1 &
         WEBHOOK_PID=$!
@@ -150,9 +159,18 @@ jobs:
           --once \
           --interval=1s \
           --timeout=180s \
-          --create-change-request=false \
+          --create-change-request="${CHANGE_REQUEST}" \
           --report=false
         kubectl wait factorytask "${TASK_NAME}" -n default --for=jsonpath='{.status.phase}'=Succeeded --timeout=60s
+        if [[ "${CHANGE_REQUEST}" == "true" ]]; then
+          LAST_RESULT_URL="$(kubectl get factorytask "${TASK_NAME}" -n default -o jsonpath='{.status.lastResultURL}')"
+          LAST_MESSAGE="$(kubectl get factorytask "${TASK_NAME}" -n default -o jsonpath='{.status.lastMessage}')"
+          if [[ -z "${LAST_RESULT_URL}" && "${LAST_MESSAGE}" != "Change request already exists" ]]; then
+            kubectl get factorytask "${TASK_NAME}" -n default -o yaml
+            echo "Expected a change request URL or an already-exists status for ai-factory-smoke issue."
+            exit 1
+          fi
+        fi
 
     - name: Show FactoryTask status
       if: always()

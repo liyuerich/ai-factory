@@ -119,6 +119,12 @@ agent prompt with `cat >/tmp/ai-factory-agent-prompt.txt`, then runs validation
 commands in the coding-agent sandbox image. Use the runtime webhook deployment
 with a real `AGENT_COMMAND` and provider tokens for production PR/MR creation.
 
+Add the additional `ai-factory-smoke` label to enable the workflow's safe
+change-request path. In that mode the task writes a small file under
+`.ai-factory/smoke/`, commits it on a generated branch, pushes the branch with
+the workflow `GITHUB_TOKEN`, and creates a GitHub pull request. Issues without
+`ai-factory-smoke` never enable branch, push, or PR creation in this workflow.
+
 ## Agent runner
 
 Webhook-generated tasks now use the issue title/body as
