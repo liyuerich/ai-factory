@@ -19,7 +19,7 @@ Optional environment:
   OPENAI_BASE_URL      default: https://api.openai.com/v1
   OPENAI_MODEL         default: gpt-4.1
   OPENAI_TEMPERATURE   default: 1
-  OPENAI_MAX_TOKENS    default: 6000
+  OPENAI_MAX_TOKENS    default: 24000
 EOF
 }
 
@@ -102,7 +102,7 @@ api_key = required_env("OPENAI_API_KEY")
 base_url = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
 model = os.environ.get("OPENAI_MODEL", "gpt-4.1")
 temperature = float(os.environ.get("OPENAI_TEMPERATURE", "1"))
-max_tokens = int(os.environ.get("OPENAI_MAX_TOKENS", "6000"))
+max_tokens = int(os.environ.get("OPENAI_MAX_TOKENS", "24000"))
 with open(required_env("AI_FACTORY_PROMPT_FILE"), "r", encoding="utf-8") as prompt_handle:
     prompt = prompt_handle.read()
 if not prompt.strip():
@@ -111,6 +111,8 @@ if not prompt.strip():
 
 system_prompt = """You are running inside an ai-factory sandbox.
 Return only a POSIX shell script. Do not wrap it in Markdown.
+Your response must start with a shell command or a shebang.
+Do not spend tokens explaining your plan. The generated shell script can inspect the repository at runtime with commands such as find, rg, sed, and go test.
 The script must modify the checked-out repository to satisfy the task.
 Use small, focused edits. Run local checks when practical.
 Do not print secrets. Do not commit, push, or open pull requests.

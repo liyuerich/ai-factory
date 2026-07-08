@@ -42,7 +42,7 @@ jobs:
       AI_FACTORY_OPENAI_BASE_URL: ${{ vars.AI_FACTORY_OPENAI_BASE_URL || 'https://api.openai.com/v1' }}
       AI_FACTORY_OPENAI_MODEL: ${{ vars.AI_FACTORY_OPENAI_MODEL || 'gpt-4.1' }}
       AI_FACTORY_OPENAI_TEMPERATURE: ${{ vars.AI_FACTORY_OPENAI_TEMPERATURE || '1' }}
-      AI_FACTORY_OPENAI_MAX_TOKENS: ${{ vars.AI_FACTORY_OPENAI_MAX_TOKENS || '6000' }}
+      AI_FACTORY_OPENAI_MAX_TOKENS: ${{ vars.AI_FACTORY_OPENAI_MAX_TOKENS || '24000' }}
       FACTORY_SMOKE_COMMAND: test -s /tmp/ai-factory-agent-prompt.txt && test -f factory/pkg/task/controller.go && git --version && go version && node --version && python3 --version && gemini --version
 
     steps:
