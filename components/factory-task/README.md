@@ -154,6 +154,104 @@ provider such as Kimi, DeepSeek, Qwen, Ollama, or vLLM. Runtime prompt files
 under `.ai-factory/agent-prompt.md` and `.ai-factory/task-instructions.md` are
 removed before committing so they do not pollute generated PRs.
 
+## GitHub issue auto-trigger
+
+You can create an issue in a GitHub repository to have ai-factory automatically
+generate a pull request. This is useful for turning feature requests, bug
+reports, or small tasks into code changes.
+
+### Required labels
+
+Use the `ai-factory` label to mark an issue for processing. Add the
+`ai-factory-run` label when you want the workflow to create a real branch,
+commit, push, and open a pull request. Without `ai-factory-run`, the issue may
+still be processed in a dry-run or validation mode that does not create PRs.
+
+- `ai-factory` — marks the issue for ai-factory.
+- `ai-factory-run` — enables the full change-request path (branch, commit, push,
+  PR).
+
+You can remove or avoid `ai-factory-run` on draft or experimental issues to
+prevent accidental PR creation.
+
+### Required secrets
+
+Create the following repository secrets before using the auto-trigger workflow:
+
+- `AI_FACTORY_OPENAI_API_KEY` or `OPENAI_API_KEY` — the API key for your
+  OpenAI-compatible provider. The installer accepts `AI_FACTORY_OPENAI_API_KEY`
+  and stores it as `OPENAI_API_KEY`.
+- `AI_FACTORY_GITHUB_TOKEN` — a GitHub personal access token with
+  `contents:write` and `pull_requests:write` permissions for the target
+  repository. Use this when the default Actions `GITHUB_TOKEN` is not allowed
+  to create pull requests.
+
+The webhook runtime also accepts `GITHUB_TOKEN` for issue comments and PR
+creation.
+
+### Repository variables for OpenAI-compatible providers
+
+Set these repository variables to point the agent at an OpenAI-compatible
+provider such as Kimi, DeepSeek, Qwen, Ollama, or vLLM:
+
+| Variable | Example | Purpose |
+| --- | --- | --- |
+| `AI_FACTORY_OPENAI_BASE_URL` | `https://api.moonshot.cn/v1` | API base URL. |
+| `AI_FACTORY_OPENAI_MODEL` | `kimi-latest` | Model name. |
+| `AI_FACTORY_OPENAI_TEMPERATURE` | `1` | Sampling temperature. |
+| `AI_FACTORY_OPENAI_MAX_TOKENS` | `24000` | Maximum response tokens. |
+| `AI_FACTORY_OPENAI_MAX_TOOL_ROUNDS` | `20` | Maximum Shell tool call rounds. |
+| `AI_FACTORY_OPENAI_MAX_FINAL_SCRIPT_ROUNDS` | `3` | Maximum no-tool final script retries. |
+| `AI_FACTORY_OPENAI_MAX_REPAIR_ROUNDS` | `2` | Maximum repair attempts after a failed script. |
+
+### Example issue body
+
+Copy and fill out this template when creating an issue:
+
+```markdown
+## Task
+
+Describe the change you want ai-factory to make.
+
+## Acceptance criteria
+
+- [ ] Specific requirement 1
+- [ ] Specific requirement 2
+- [ ] `go test ./...` passes
+
+## Notes
+
+- Keep the change minimal and focused.
+- Do not modify `go.mod` or `go.sum` only to work around the local Go toolchain version.
+```
+
+Add the labels `ai-factory` and `ai-factory-run` to the issue after you have
+reviewed it.
+
+### Trigger flow
+
+1. A user creates a GitHub issue with the required labels.
+2. The webhook or GitHub Actions workflow receives the issue event.
+3. A `FactoryTask` is generated with the issue title and body as instructions.
+4. The watch controller picks up the `FactoryTask` and provisions a sandbox.
+5. The sandbox agent runs inside the cloned repository and executes the
+   instructions.
+6. The agent runs the validation command, for example `go test ./...`.
+7. If validation succeeds and `ai-factory-run` is present, the controller
+   creates a branch, commits the changes, pushes the branch, and opens a pull
+   request.
+8. The issue is updated with a comment linking to the pull request or reporting
+   the result.
+
+### Trigger safely
+
+- Review the issue body before adding `ai-factory-run`. Use only `ai-factory` for
+  dry-run validation.
+- Remove `ai-factory-run` from issues you are not ready to execute.
+- Use a test repository first to confirm the webhook and provider settings.
+- Keep `AI_FACTORY_OPENAI_API_KEY` and `AI_FACTORY_GITHUB_TOKEN` as repository
+  secrets and do not log them in issues.
+
 ## Agent runner
 
 Webhook-generated tasks now use the issue title/body as
