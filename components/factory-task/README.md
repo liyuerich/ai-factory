@@ -55,6 +55,7 @@ installer without those values leaves any existing secret untouched.
 | `OPENAI_TEMPERATURE` | empty | Optional OpenAI-compatible temperature injected into agent tasks. |
 | `OPENAI_MAX_TOKENS` | empty | Optional OpenAI-compatible max token limit injected into agent tasks. |
 | `OPENAI_MAX_TOOL_ROUNDS` | empty | Optional OpenAI-compatible shell tool round limit injected into agent tasks. |
+| `OPENAI_MAX_FINAL_SCRIPT_ROUNDS` | empty | Optional OpenAI-compatible no-tool final script retry limit injected into agent tasks. |
 | `OPENAI_MAX_REPAIR_ROUNDS` | empty | Optional OpenAI-compatible generated-script repair round limit injected into agent tasks. |
 | `CODEX_API_KEY` | empty | Optional Codex API key for tasks that override `AGENT_COMMAND` to Codex. |
 | `WEBHOOK_INGRESS_HOST` | empty | Optional host for creating a webhook `Ingress`. |
@@ -177,6 +178,7 @@ shell script, and executes that script in the cloned repository. It uses:
 | `OPENAI_TEMPERATURE` | `1` | Sampling temperature. |
 | `OPENAI_MAX_TOKENS` | `24000` | Maximum response tokens for the generated script. |
 | `OPENAI_MAX_TOOL_ROUNDS` | `20` | Maximum Shell tool call rounds before the model must return a script. |
+| `OPENAI_MAX_FINAL_SCRIPT_ROUNDS` | `3` | Maximum no-tool final script retries if the model still attempts tool calls. |
 | `OPENAI_MAX_REPAIR_ROUNDS` | `2` | Maximum generated-script repair attempts after the script exits non-zero. |
 
 ## Sandbox git authentication

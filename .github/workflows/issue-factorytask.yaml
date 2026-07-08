@@ -44,6 +44,7 @@ jobs:
       AI_FACTORY_OPENAI_TEMPERATURE: ${{ vars.AI_FACTORY_OPENAI_TEMPERATURE || '1' }}
       AI_FACTORY_OPENAI_MAX_TOKENS: ${{ vars.AI_FACTORY_OPENAI_MAX_TOKENS || '24000' }}
       AI_FACTORY_OPENAI_MAX_TOOL_ROUNDS: ${{ vars.AI_FACTORY_OPENAI_MAX_TOOL_ROUNDS || '20' }}
+      AI_FACTORY_OPENAI_MAX_FINAL_SCRIPT_ROUNDS: ${{ vars.AI_FACTORY_OPENAI_MAX_FINAL_SCRIPT_ROUNDS || '3' }}
       AI_FACTORY_OPENAI_MAX_REPAIR_ROUNDS: ${{ vars.AI_FACTORY_OPENAI_MAX_REPAIR_ROUNDS || '2' }}
       FACTORY_SMOKE_COMMAND: test -s /tmp/ai-factory-agent-prompt.txt && test -f factory/pkg/task/controller.go && git --version && go version && node --version && python3 --version && gemini --version
 
@@ -129,6 +130,7 @@ jobs:
         OPENAI_TEMPERATURE: ${{ env.AI_FACTORY_OPENAI_TEMPERATURE }}
         OPENAI_MAX_TOKENS: ${{ env.AI_FACTORY_OPENAI_MAX_TOKENS }}
         OPENAI_MAX_TOOL_ROUNDS: ${{ env.AI_FACTORY_OPENAI_MAX_TOOL_ROUNDS }}
+        OPENAI_MAX_FINAL_SCRIPT_ROUNDS: ${{ env.AI_FACTORY_OPENAI_MAX_FINAL_SCRIPT_ROUNDS }}
         OPENAI_MAX_REPAIR_ROUNDS: ${{ env.AI_FACTORY_OPENAI_MAX_REPAIR_ROUNDS }}
       run: |
         TASK_REPOSITORY="$(printf '%s' "${FACTORY_REPOSITORY}" | tr '[:upper:]/_' '[:lower:]--')"
@@ -156,6 +158,7 @@ jobs:
           AGENT_ENV_ARGS+=(--agent-env OPENAI_TEMPERATURE)
           AGENT_ENV_ARGS+=(--agent-env OPENAI_MAX_TOKENS)
           AGENT_ENV_ARGS+=(--agent-env OPENAI_MAX_TOOL_ROUNDS)
+          AGENT_ENV_ARGS+=(--agent-env OPENAI_MAX_FINAL_SCRIPT_ROUNDS)
           AGENT_ENV_ARGS+=(--agent-env OPENAI_MAX_REPAIR_ROUNDS)
           TASK_COMMAND="${AI_FACTORY_RUN_VALIDATION_COMMAND}"
           RESULT_EXPECTATION="an ai-factory-run change request URL or an existing PR status"

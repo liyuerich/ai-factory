@@ -21,6 +21,7 @@ Optional environment:
   OPENAI_TEMPERATURE   default: 1
   OPENAI_MAX_TOKENS    default: 24000
   OPENAI_MAX_TOOL_ROUNDS default: 20
+  OPENAI_MAX_FINAL_SCRIPT_ROUNDS default: 3
   OPENAI_MAX_REPAIR_ROUNDS default: 2
 EOF
 }
@@ -235,6 +236,7 @@ model = os.environ.get("OPENAI_MODEL", "gpt-4.1")
 temperature = float(os.environ.get("OPENAI_TEMPERATURE", "1"))
 max_tokens = int(os.environ.get("OPENAI_MAX_TOKENS", "24000"))
 max_tool_rounds = int(os.environ.get("OPENAI_MAX_TOOL_ROUNDS", "20"))
+max_final_script_rounds = int(os.environ.get("OPENAI_MAX_FINAL_SCRIPT_ROUNDS", "3"))
 max_repair_rounds = int(os.environ.get("OPENAI_MAX_REPAIR_ROUNDS", "2"))
 with open(required_env("AI_FACTORY_PROMPT_FILE"), "r", encoding="utf-8") as prompt_handle:
     prompt = prompt_handle.read()
@@ -279,7 +281,7 @@ tools = [
 content = ""
 payload = {}
 final_script_prompt_added = False
-for round_index in range(max_tool_rounds + 2):
+for round_index in range(max_tool_rounds + max_final_script_rounds + 1):
     final_script_round = round_index > max_tool_rounds
     if final_script_round and not final_script_prompt_added:
         messages.append(
@@ -318,6 +320,25 @@ for round_index in range(max_tool_rounds + 2):
 
     dump_response_diagnostics(payload)
     if tool_calls:
+        if final_script_round:
+            final_attempt = round_index - max_tool_rounds
+            if final_attempt >= max_final_script_rounds:
+                print(f"OpenAI-compatible model returned tool calls during all final script attempts ({max_final_script_rounds})", file=sys.stderr)
+                print(response_preview(payload), file=sys.stderr)
+                sys.exit(1)
+            attempted_tools = truncate(json.dumps(tool_calls, ensure_ascii=False), 2000)
+            print("OpenAI-compatible model returned tool calls during final script generation; retrying without tools", file=sys.stderr)
+            messages.append(
+                {
+                    "role": "user",
+                    "content": (
+                        "Your last response still tried to call tools, but no more tools are available. "
+                        "Do not call Shell. Use the information you already gathered and return only the final POSIX shell script. "
+                        f"Attempted tool calls: {attempted_tools}"
+                    ),
+                }
+            )
+            continue
         if round_index >= max_tool_rounds:
             print(f"OpenAI-compatible model reached max tool rounds ({max_tool_rounds}); requesting final script without tools", file=sys.stderr)
             continue
