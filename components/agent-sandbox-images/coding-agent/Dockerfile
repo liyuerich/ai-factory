@@ -17,9 +17,11 @@ FROM node:22-bookworm
 ARG DEBIAN_FRONTEND=noninteractive
 ARG INSTALL_GEMINI_CLI=true
 ARG INSTALL_CODEX_CLI=false
+ARG GO_VERSION=1.25.4
 
 ENV HOME=/home/agent \
     WORKSPACE=/workspace \
+    PATH=/usr/local/go/bin:$PATH \
     npm_config_update_notifier=false \
     npm_config_fund=false \
     npm_config_audit=false
@@ -32,7 +34,6 @@ RUN apt-get update \
         curl \
         dnsutils \
         git \
-        golang-go \
         jq \
         less \
         make \
@@ -46,6 +47,17 @@ RUN apt-get update \
         vim-tiny \
         xz-utils \
     && rm -rf /var/lib/apt/lists/*
+
+RUN go_arch="$(dpkg --print-architecture)" \
+    && case "${go_arch}" in \
+        amd64) go_arch=amd64 ;; \
+        arm64) go_arch=arm64 ;; \
+        *) echo "unsupported Go architecture: ${go_arch}" >&2; exit 1 ;; \
+    esac \
+    && curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-${go_arch}.tar.gz" -o /tmp/go.tgz \
+    && tar -C /usr/local -xzf /tmp/go.tgz \
+    && rm /tmp/go.tgz \
+    && go version
 
 RUN if [ "${INSTALL_GEMINI_CLI}" = "true" ]; then \
         npm install -g @google/gemini-cli; \

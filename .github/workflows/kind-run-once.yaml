@@ -70,7 +70,9 @@ jobs:
 
     - name: Build coding agent sandbox image
       run: |
+        GO_VERSION="$(awk '/^go / {print $2; exit}' go.mod)"
         docker build \
+          --build-arg GO_VERSION="${GO_VERSION}" \
           -t "${CODING_AGENT_IMAGE}" \
           components/agent-sandbox-images/coding-agent
         kind load docker-image "${CODING_AGENT_IMAGE}" --name "${KIND_CLUSTER_NAME}"
