@@ -33,6 +33,13 @@ FACTORY_NAMESPACE=${FACTORY_NAMESPACE:-factory-system}
 GITHUB_TOKEN=${GITHUB_TOKEN:-}
 GITLAB_TOKEN=${GITLAB_TOKEN:-}
 WEBHOOK_SECRET=${WEBHOOK_SECRET:-}
+AI_FACTORY_OPENAI_API_KEY=${AI_FACTORY_OPENAI_API_KEY:-}
+OPENAI_API_KEY=${OPENAI_API_KEY:-${AI_FACTORY_OPENAI_API_KEY}}
+OPENAI_BASE_URL=${OPENAI_BASE_URL:-}
+OPENAI_MODEL=${OPENAI_MODEL:-}
+OPENAI_TEMPERATURE=${OPENAI_TEMPERATURE:-}
+OPENAI_MAX_TOKENS=${OPENAI_MAX_TOKENS:-}
+CODEX_API_KEY=${CODEX_API_KEY:-}
 
 if [[ -z "${FACTORY_IMAGE}" ]]; then
     echo "Error: FACTORY_IMAGE is required when INSTALL_FACTORY_TASK_RUNTIME=true."
@@ -51,6 +58,24 @@ if [[ -n "${GITLAB_TOKEN}" ]]; then
 fi
 if [[ -n "${WEBHOOK_SECRET}" ]]; then
     SECRET_ARGS+=(--from-literal="WEBHOOK_SECRET=${WEBHOOK_SECRET}")
+fi
+if [[ -n "${OPENAI_API_KEY}" ]]; then
+    SECRET_ARGS+=(--from-literal="OPENAI_API_KEY=${OPENAI_API_KEY}")
+fi
+if [[ -n "${OPENAI_BASE_URL}" ]]; then
+    SECRET_ARGS+=(--from-literal="OPENAI_BASE_URL=${OPENAI_BASE_URL}")
+fi
+if [[ -n "${OPENAI_MODEL}" ]]; then
+    SECRET_ARGS+=(--from-literal="OPENAI_MODEL=${OPENAI_MODEL}")
+fi
+if [[ -n "${OPENAI_TEMPERATURE}" ]]; then
+    SECRET_ARGS+=(--from-literal="OPENAI_TEMPERATURE=${OPENAI_TEMPERATURE}")
+fi
+if [[ -n "${OPENAI_MAX_TOKENS}" ]]; then
+    SECRET_ARGS+=(--from-literal="OPENAI_MAX_TOKENS=${OPENAI_MAX_TOKENS}")
+fi
+if [[ -n "${CODEX_API_KEY}" ]]; then
+    SECRET_ARGS+=(--from-literal="CODEX_API_KEY=${CODEX_API_KEY}")
 fi
 
 if [[ ${#SECRET_ARGS[@]} -gt 0 ]]; then

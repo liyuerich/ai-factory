@@ -72,7 +72,7 @@ func BuildExecutionPlan(task *FactoryTask) (*ExecutionPlan, error) {
 	workDir := "/workspace/repo"
 	agentCommand := task.Spec.Agent.Command
 	if agentCommand == "" {
-		agentCommand = "gemini --yolo"
+		agentCommand = "ai-factory-agent openai-compatible"
 	}
 
 	plan := &ExecutionPlan{

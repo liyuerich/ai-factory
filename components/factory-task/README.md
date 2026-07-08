@@ -15,14 +15,19 @@ FACTORY_IMAGE=registry.example.com/ai-factory/factory:latest \
 INSTALL_FACTORY_TASK_RUNTIME=true \
 GITHUB_TOKEN=... \
 GITLAB_TOKEN=... \
+OPENAI_API_KEY=... \
+OPENAI_BASE_URL=https://api.moonshot.cn/v1 \
+OPENAI_MODEL=<kimi-model> \
 WEBHOOK_SECRET=... \
 components/factory-task/install
 ```
 
 The `FACTORY_IMAGE` image must contain the `factory` CLI and `kubectl`.
 Provider credentials are written to the `factory-task-secrets` secret only when
-`GITHUB_TOKEN`, `GITLAB_TOKEN`, or `WEBHOOK_SECRET` is provided. Re-running the
-installer without those values leaves any existing secret untouched.
+`GITHUB_TOKEN`, `GITLAB_TOKEN`, `WEBHOOK_SECRET`, `OPENAI_API_KEY`,
+`OPENAI_BASE_URL`, `OPENAI_MODEL`, `OPENAI_TEMPERATURE`, `OPENAI_MAX_TOKENS`,
+or `CODEX_API_KEY` is provided. Re-running the installer without those values
+leaves any existing secret untouched.
 
 ## Runtime settings
 
@@ -37,13 +42,19 @@ installer without those values leaves any existing secret untouched.
 | `REQUIRE_LABEL` | `ai-factory` | Issue label required to trigger tasks. |
 | `SANDBOX_TEMPLATE` | `go-dev` | Sandbox template used for generated tasks. |
 | `AGENT_NAME` | `builder` | Agent name used for generated tasks. |
-| `AGENT_COMMAND` | `gemini --yolo` | Agent runner command used for generated tasks. |
+| `AGENT_COMMAND` | `ai-factory-agent openai-compatible` | Agent runner command used for generated tasks. |
 | `PROMPT_REF` | `.agents/builder/agent.md` | Agent prompt file read from the cloned repository. |
 | `TASK_COMMAND` | `go test ./...` | Command inserted into generated FactoryTasks. |
 | `CHANGE_REQUEST` | `true` | Whether webhook-generated tasks should branch, commit, push, and create PRs/MRs. |
 | `GITHUB_TOKEN` | empty | Token used for GitHub issue comments and pull requests. |
 | `GITLAB_TOKEN` | empty | Token used for GitLab issue comments and merge requests. |
 | `WEBHOOK_SECRET` | empty | GitHub webhook secret or GitLab webhook token. |
+| `OPENAI_API_KEY` | empty | API key injected into OpenAI-compatible agent tasks. `AI_FACTORY_OPENAI_API_KEY` is also accepted by the installer and stored as `OPENAI_API_KEY`. |
+| `OPENAI_BASE_URL` | empty | Optional OpenAI-compatible API base URL injected into agent tasks. |
+| `OPENAI_MODEL` | empty | Optional OpenAI-compatible model name injected into agent tasks. |
+| `OPENAI_TEMPERATURE` | empty | Optional OpenAI-compatible temperature injected into agent tasks. |
+| `OPENAI_MAX_TOKENS` | empty | Optional OpenAI-compatible max token limit injected into agent tasks. |
+| `CODEX_API_KEY` | empty | Optional Codex API key for tasks that override `AGENT_COMMAND` to Codex. |
 | `WEBHOOK_INGRESS_HOST` | empty | Optional host for creating a webhook `Ingress`. |
 | `WEBHOOK_INGRESS_CLASS` | empty | Optional ingress class name when `WEBHOOK_INGRESS_HOST` is set. |
 
@@ -131,9 +142,12 @@ enable branch, push, or PR creation in this workflow.
 Use `ai-factory-run` for real issue-driven tasks. That label enables branch,
 commit, push, and PR creation without the smoke file. The workflow runs the
 issue instructions through `AI_FACTORY_RUN_AGENT_COMMAND`, defaulting to
-`codex exec --sandbox workspace-write -`, then runs
-`AI_FACTORY_RUN_VALIDATION_COMMAND`, defaulting to `go test ./...`. Configure a
-`CODEX_API_KEY` repository secret before using this path. Runtime prompt files
+`ai-factory-agent openai-compatible`, then runs
+`AI_FACTORY_RUN_VALIDATION_COMMAND`, defaulting to `go test ./...`. Configure an
+`AI_FACTORY_OPENAI_API_KEY` repository secret, or an `OPENAI_API_KEY`
+repository secret, before using this path. Set `AI_FACTORY_OPENAI_BASE_URL` and
+`AI_FACTORY_OPENAI_MODEL` repository variables to use an OpenAI-compatible
+provider such as Kimi, DeepSeek, Qwen, Ollama, or vLLM. Runtime prompt files
 under `.ai-factory/agent-prompt.md` and `.ai-factory/task-instructions.md` are
 removed before committing so they do not pollute generated PRs.
 
@@ -145,9 +159,21 @@ configured coding agent inside the cloned repository before running validation
 commands. The generated prompt is the optional `spec.agent.promptRef` file plus
 the FactoryTask instructions.
 
-The default runner is `gemini --yolo`; set `AGENT_COMMAND` for webhook-generated
-tasks or `spec.agent.command` on a hand-written `FactoryTask` to use another
-runner such as Codex.
+The default runner is `ai-factory-agent openai-compatible`; set
+`AGENT_COMMAND` for webhook-generated tasks or `spec.agent.command` on a
+hand-written `FactoryTask` to use a specific runner.
+
+`ai-factory-agent openai-compatible` reads the generated prompt from stdin,
+calls a `/chat/completions` compatible endpoint, asks the model for a focused
+shell script, and executes that script in the cloned repository. It uses:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `OPENAI_API_KEY` | required | API key for the compatible provider. |
+| `OPENAI_BASE_URL` | `https://api.openai.com/v1` | API base URL. For Kimi, use `https://api.moonshot.cn/v1`. |
+| `OPENAI_MODEL` | `gpt-4.1` | Model name for the provider. |
+| `OPENAI_TEMPERATURE` | `0.2` | Sampling temperature. |
+| `OPENAI_MAX_TOKENS` | `6000` | Maximum response tokens for the generated script. |
 
 ## Sandbox git authentication
 

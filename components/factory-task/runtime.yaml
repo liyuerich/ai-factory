@@ -140,6 +140,12 @@ spec:
             --sandbox-template=__SANDBOX_TEMPLATE__ \
             --agent=__AGENT_NAME__ \
             --agent-command="__AGENT_COMMAND__" \
+            --agent-env=OPENAI_API_KEY \
+            --agent-env=OPENAI_BASE_URL \
+            --agent-env=OPENAI_MODEL \
+            --agent-env=OPENAI_TEMPERATURE \
+            --agent-env=OPENAI_MAX_TOKENS \
+            --agent-env=CODEX_API_KEY \
             --prompt-ref=__PROMPT_REF__ \
             --change-request=__CHANGE_REQUEST__ \
             --command="__TASK_COMMAND__" \

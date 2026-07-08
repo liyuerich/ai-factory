@@ -427,7 +427,7 @@ func init() {
 	changeRequestCreateCmd.Flags().BoolVar(&changeRequestCreateOptions.dryRun, "dry-run", false, "print the PR/MR request without sending it")
 	webhookCmd.PersistentFlags().StringVarP(&webhookOptions.namespace, "namespace", "n", "default", "FactoryTask namespace")
 	webhookCmd.PersistentFlags().StringVar(&webhookOptions.agent, "agent", "builder", "agent name for generated FactoryTasks")
-	webhookCmd.PersistentFlags().StringVar(&webhookOptions.agentCommand, "agent-command", "gemini --yolo", "agent runner command for generated FactoryTasks")
+	webhookCmd.PersistentFlags().StringVar(&webhookOptions.agentCommand, "agent-command", "ai-factory-agent openai-compatible", "agent runner command for generated FactoryTasks")
 	webhookCmd.PersistentFlags().StringArrayVar(&webhookOptions.agentEnv, "agent-env", nil, "environment variable to inject into the agent sandbox; can be repeated")
 	webhookCmd.PersistentFlags().StringVar(&webhookOptions.promptRef, "prompt-ref", "", "agent prompt reference")
 	webhookCmd.PersistentFlags().StringVar(&webhookOptions.sandboxTemplateRef, "sandbox-template", "go-dev", "sandbox template reference")

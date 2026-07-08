@@ -37,8 +37,12 @@ jobs:
       IMAGE_PREFIX: ai-factory
       IMAGE_TAG: ci
       CODING_AGENT_IMAGE: ai-factory/coding-agent-sandbox:ci
-      AI_FACTORY_RUN_AGENT_COMMAND: ${{ vars.AI_FACTORY_RUN_AGENT_COMMAND || 'codex exec --sandbox workspace-write -' }}
+      AI_FACTORY_RUN_AGENT_COMMAND: ${{ vars.AI_FACTORY_RUN_AGENT_COMMAND || 'ai-factory-agent openai-compatible' }}
       AI_FACTORY_RUN_VALIDATION_COMMAND: ${{ vars.AI_FACTORY_RUN_VALIDATION_COMMAND || 'go test ./...' }}
+      AI_FACTORY_OPENAI_BASE_URL: ${{ vars.AI_FACTORY_OPENAI_BASE_URL || 'https://api.openai.com/v1' }}
+      AI_FACTORY_OPENAI_MODEL: ${{ vars.AI_FACTORY_OPENAI_MODEL || 'gpt-4.1' }}
+      AI_FACTORY_OPENAI_TEMPERATURE: ${{ vars.AI_FACTORY_OPENAI_TEMPERATURE || '0.2' }}
+      AI_FACTORY_OPENAI_MAX_TOKENS: ${{ vars.AI_FACTORY_OPENAI_MAX_TOKENS || '6000' }}
       FACTORY_SMOKE_COMMAND: test -s /tmp/ai-factory-agent-prompt.txt && test -f factory/pkg/task/controller.go && git --version && go version && node --version && python3 --version && gemini --version
 
     steps:
@@ -115,6 +119,11 @@ jobs:
         GITHUB_TOKEN: ${{ github.token }}
         AI_FACTORY_GITHUB_TOKEN: ${{ secrets.AI_FACTORY_GITHUB_TOKEN || github.token }}
         CODEX_API_KEY: ${{ secrets.CODEX_API_KEY }}
+        OPENAI_API_KEY: ${{ secrets.AI_FACTORY_OPENAI_API_KEY || secrets.OPENAI_API_KEY }}
+        OPENAI_BASE_URL: ${{ env.AI_FACTORY_OPENAI_BASE_URL }}
+        OPENAI_MODEL: ${{ env.AI_FACTORY_OPENAI_MODEL }}
+        OPENAI_TEMPERATURE: ${{ env.AI_FACTORY_OPENAI_TEMPERATURE }}
+        OPENAI_MAX_TOKENS: ${{ env.AI_FACTORY_OPENAI_MAX_TOKENS }}
       run: |
         TASK_REPOSITORY="$(printf '%s' "${FACTORY_REPOSITORY}" | tr '[:upper:]/_' '[:lower:]--')"
         TASK_NAME="github-${TASK_REPOSITORY}-${ISSUE_NUMBER}"
@@ -129,12 +138,17 @@ jobs:
           RESULT_EXPECTATION="an ai-factory-smoke change request URL or an existing PR status"
         elif jq -e '.issue.labels[]?.name == "ai-factory-run"' "${GITHUB_EVENT_PATH}" >/dev/null; then
           CHANGE_REQUEST=true
-          if [[ -z "${CODEX_API_KEY}" ]]; then
-            echo "CODEX_API_KEY repository secret is required for ai-factory-run."
+          if [[ "${AI_FACTORY_RUN_AGENT_COMMAND}" == *"openai-compatible"* && -z "${OPENAI_API_KEY}" ]]; then
+            echo "AI_FACTORY_OPENAI_API_KEY or OPENAI_API_KEY repository secret is required for openai-compatible ai-factory-run."
             exit 1
           fi
           AGENT_COMMAND="${AI_FACTORY_RUN_AGENT_COMMAND}"
           AGENT_ENV_ARGS+=(--agent-env CODEX_API_KEY)
+          AGENT_ENV_ARGS+=(--agent-env OPENAI_API_KEY)
+          AGENT_ENV_ARGS+=(--agent-env OPENAI_BASE_URL)
+          AGENT_ENV_ARGS+=(--agent-env OPENAI_MODEL)
+          AGENT_ENV_ARGS+=(--agent-env OPENAI_TEMPERATURE)
+          AGENT_ENV_ARGS+=(--agent-env OPENAI_MAX_TOKENS)
           TASK_COMMAND="${AI_FACTORY_RUN_VALIDATION_COMMAND}"
           RESULT_EXPECTATION="an ai-factory-run change request URL or an existing PR status"
         fi

@@ -107,7 +107,8 @@ go run ./factory/cmd/factory task controller run-once examples/factory-task-gith
 The `run-once` command is the first controller slice: it applies the `FactoryTask`, patches task status through the task lifecycle, creates the `SandboxClaim`, waits for agent-sandbox to bind a sandbox, and executes the generated plan inside the sandbox container.
 When `spec.work.instructions` is set, the plan runs the configured coding agent
 inside the cloned repository before running `spec.work.commands`. The default
-agent command is `gemini --yolo`; override it with `spec.agent.command`.
+agent command is `ai-factory-agent openai-compatible`; override it with
+`spec.agent.command`.
 
 Patch task status directly when debugging a controller transition:
 

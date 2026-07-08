@@ -188,6 +188,9 @@ spec:
 	if plan.SandboxClaim != "validate-gitlab-project-claim" {
 		t.Fatalf("SandboxClaim = %q", plan.SandboxClaim)
 	}
+	if plan.AgentCommand != "ai-factory-agent openai-compatible" {
+		t.Fatalf("AgentCommand = %q", plan.AgentCommand)
+	}
 	if got, want := len(plan.Steps), 3; got != want {
 		t.Fatalf("len(Steps) = %d, want %d", got, want)
 	}

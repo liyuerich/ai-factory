@@ -1,6 +1,159 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+usage() {
+    cat >&2 <<'EOF'
+Usage:
+  ai-factory-agent openai-compatible
+  ai-factory-agent gemini [args...]
+  ai-factory-agent codex [args...]
+  ai-factory-agent [args...]
+
+OpenAI-compatible mode reads the FactoryTask prompt from stdin and executes a
+model-generated shell script in the current repository.
+
+Required environment:
+  OPENAI_API_KEY
+
+Optional environment:
+  OPENAI_BASE_URL      default: https://api.openai.com/v1
+  OPENAI_MODEL         default: gpt-4.1
+  OPENAI_TEMPERATURE   default: 0.2
+  OPENAI_MAX_TOKENS    default: 6000
+EOF
+}
+
+run_openai_compatible() {
+    prompt_file="$(mktemp)"
+    cat > "${prompt_file}"
+    trap 'rm -f "${prompt_file}"' RETURN
+    AI_FACTORY_PROMPT_FILE="${prompt_file}" python3 - "$@" <<'PY'
+import json
+import os
+import re
+import stat
+import subprocess
+import sys
+import tempfile
+import urllib.error
+import urllib.request
+
+
+def required_env(name):
+    value = os.environ.get(name, "").strip()
+    if not value:
+        print(f"{name} is required for ai-factory-agent openai-compatible", file=sys.stderr)
+        sys.exit(2)
+    return value
+
+
+def strip_code_fence(text):
+    match = re.search(r"```(?:bash|sh|shell)?\s*(.*?)```", text, re.DOTALL | re.IGNORECASE)
+    if match:
+        return match.group(1).strip()
+    return text.strip()
+
+
+api_key = required_env("OPENAI_API_KEY")
+base_url = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
+model = os.environ.get("OPENAI_MODEL", "gpt-4.1")
+temperature = float(os.environ.get("OPENAI_TEMPERATURE", "0.2"))
+max_tokens = int(os.environ.get("OPENAI_MAX_TOKENS", "6000"))
+with open(required_env("AI_FACTORY_PROMPT_FILE"), "r", encoding="utf-8") as prompt_handle:
+    prompt = prompt_handle.read()
+if not prompt.strip():
+    print("FactoryTask prompt on stdin is empty", file=sys.stderr)
+    sys.exit(2)
+
+system_prompt = """You are running inside an ai-factory sandbox.
+Return only a POSIX shell script. Do not wrap it in Markdown.
+The script must modify the checked-out repository to satisfy the task.
+Use small, focused edits. Run local checks when practical.
+Do not print secrets. Do not commit, push, or open pull requests.
+ai-factory will run validation, commit, push, and create the change request after you exit.
+"""
+request = {
+    "model": model,
+    "messages": [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": prompt},
+    ],
+    "temperature": temperature,
+    "max_tokens": max_tokens,
+}
+data = json.dumps(request).encode("utf-8")
+http_request = urllib.request.Request(
+    f"{base_url}/chat/completions",
+    data=data,
+    headers={
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    },
+    method="POST",
+)
+try:
+    with urllib.request.urlopen(http_request, timeout=300) as response:
+        response_body = response.read()
+except urllib.error.HTTPError as exc:
+    detail = exc.read().decode("utf-8", errors="replace")
+    print(f"OpenAI-compatible API request failed: HTTP {exc.code}", file=sys.stderr)
+    print(detail, file=sys.stderr)
+    sys.exit(1)
+except urllib.error.URLError as exc:
+    print(f"OpenAI-compatible API request failed: {exc}", file=sys.stderr)
+    sys.exit(1)
+
+try:
+    payload = json.loads(response_body)
+    content = payload["choices"][0]["message"]["content"]
+except (KeyError, IndexError, json.JSONDecodeError) as exc:
+    print(f"OpenAI-compatible API response did not contain choices[0].message.content: {exc}", file=sys.stderr)
+    print(response_body.decode("utf-8", errors="replace"), file=sys.stderr)
+    sys.exit(1)
+
+script = strip_code_fence(content)
+if not script:
+    print("OpenAI-compatible model returned an empty script", file=sys.stderr)
+    sys.exit(1)
+
+with tempfile.NamedTemporaryFile("w", prefix="ai-factory-agent-", suffix=".sh", delete=False) as handle:
+    handle.write("#!/usr/bin/env bash\nset -euo pipefail\n")
+    handle.write(script)
+    handle.write("\n")
+    script_path = handle.name
+os.chmod(script_path, os.stat(script_path).st_mode | stat.S_IXUSR)
+print(f"--- RUN: OpenAI-compatible generated script ({model})")
+try:
+    completed = subprocess.run(["/bin/bash", script_path], check=False)
+finally:
+    try:
+        os.unlink(script_path)
+    except OSError:
+        pass
+sys.exit(completed.returncode)
+PY
+}
+
+case "${1:-}" in
+    openai-compatible)
+        shift
+        run_openai_compatible "$@"
+        exit $?
+        ;;
+    gemini)
+        shift
+        exec gemini --yolo "$@"
+        ;;
+    codex)
+        shift
+        exec codex "$@"
+        ;;
+    -h|--help|help)
+        usage
+        exit 0
+        ;;
+esac
+
 if command -v gemini >/dev/null 2>&1; then
     exec gemini --yolo "$@"
 fi
@@ -9,5 +162,9 @@ if command -v codex >/dev/null 2>&1; then
     exec codex "$@"
 fi
 
-echo "No supported coding agent CLI found. Install gemini or codex in the sandbox image." >&2
+if [ -n "${OPENAI_API_KEY:-}" ]; then
+    run_openai_compatible "$@"
+fi
+
+echo "No supported coding agent CLI found. Install gemini/codex or set OPENAI_API_KEY for openai-compatible mode." >&2
 exit 127

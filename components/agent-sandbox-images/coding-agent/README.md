@@ -30,3 +30,10 @@ containers:
 The wrapper command `ai-factory-agent` prefers `gemini --yolo` when Gemini CLI
 is present and falls back to `codex` if installed. Build with
 `--build-arg INSTALL_CODEX_CLI=true` to install the Codex CLI package too.
+
+Use `ai-factory-agent openai-compatible` for providers that expose an
+OpenAI-compatible `/chat/completions` API. The command reads the FactoryTask
+prompt from stdin, asks the model to generate a focused shell script, and runs
+that script in the current repository. Configure it with `OPENAI_API_KEY`,
+`OPENAI_BASE_URL`, and `OPENAI_MODEL`. For example, Kimi can be configured with
+`OPENAI_BASE_URL=https://api.moonshot.cn/v1` and the provider's model name.
