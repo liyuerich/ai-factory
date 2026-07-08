@@ -26,8 +26,8 @@ The `FACTORY_IMAGE` image must contain the `factory` CLI and `kubectl`.
 Provider credentials are written to the `factory-task-secrets` secret only when
 `GITHUB_TOKEN`, `GITLAB_TOKEN`, `WEBHOOK_SECRET`, `OPENAI_API_KEY`,
 `OPENAI_BASE_URL`, `OPENAI_MODEL`, `OPENAI_TEMPERATURE`, `OPENAI_MAX_TOKENS`,
-or `CODEX_API_KEY` is provided. Re-running the installer without those values
-leaves any existing secret untouched.
+`OPENAI_MAX_TOOL_ROUNDS`, or `CODEX_API_KEY` is provided. Re-running the
+installer without those values leaves any existing secret untouched.
 
 ## Runtime settings
 
@@ -54,6 +54,7 @@ leaves any existing secret untouched.
 | `OPENAI_MODEL` | empty | Optional OpenAI-compatible model name injected into agent tasks. |
 | `OPENAI_TEMPERATURE` | empty | Optional OpenAI-compatible temperature injected into agent tasks. |
 | `OPENAI_MAX_TOKENS` | empty | Optional OpenAI-compatible max token limit injected into agent tasks. |
+| `OPENAI_MAX_TOOL_ROUNDS` | empty | Optional OpenAI-compatible shell tool round limit injected into agent tasks. |
 | `CODEX_API_KEY` | empty | Optional Codex API key for tasks that override `AGENT_COMMAND` to Codex. |
 | `WEBHOOK_INGRESS_HOST` | empty | Optional host for creating a webhook `Ingress`. |
 | `WEBHOOK_INGRESS_CLASS` | empty | Optional ingress class name when `WEBHOOK_INGRESS_HOST` is set. |
@@ -174,6 +175,7 @@ shell script, and executes that script in the cloned repository. It uses:
 | `OPENAI_MODEL` | `gpt-4.1` | Model name for the provider. |
 | `OPENAI_TEMPERATURE` | `1` | Sampling temperature. |
 | `OPENAI_MAX_TOKENS` | `24000` | Maximum response tokens for the generated script. |
+| `OPENAI_MAX_TOOL_ROUNDS` | `8` | Maximum Shell tool call rounds before the model must return a script. |
 
 ## Sandbox git authentication
 

@@ -20,6 +20,7 @@ Optional environment:
   OPENAI_MODEL         default: gpt-4.1
   OPENAI_TEMPERATURE   default: 1
   OPENAI_MAX_TOKENS    default: 24000
+  OPENAI_MAX_TOOL_ROUNDS default: 8
 EOF
 }
 
@@ -98,11 +99,78 @@ def response_preview(payload):
         return truncate(payload, 4000)
 
 
+def redact(text):
+    secret_names = (
+        "OPENAI_API_KEY",
+        "CODEX_API_KEY",
+        "GITHUB_TOKEN",
+        "GITLAB_TOKEN",
+        "AI_FACTORY_GITHUB_TOKEN",
+    )
+    redacted = str(text)
+    for name in secret_names:
+        value = os.environ.get(name)
+        if value:
+            redacted = redacted.replace(value, f"<redacted:{name}>")
+    return redacted
+
+
+def run_shell_tool(arguments):
+    try:
+        args = json.loads(arguments or "{}")
+    except json.JSONDecodeError as exc:
+        return f"invalid Shell tool arguments JSON: {exc}"
+    command = args.get("command", "")
+    if not isinstance(command, str) or not command.strip():
+        return "invalid Shell tool arguments: command must be a non-empty string"
+    print(f"--- TOOL: Shell {command}", file=sys.stderr)
+    try:
+        completed = subprocess.run(
+            ["/bin/bash", "-lc", command],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+    except subprocess.TimeoutExpired as exc:
+        output = (exc.stdout or "") + (exc.stderr or "")
+        return f"Shell tool timed out after 120s\n{truncate(redact(output), 12000)}"
+    output = [
+        f"exit_code={completed.returncode}",
+        "--- stdout ---",
+        completed.stdout,
+        "--- stderr ---",
+        completed.stderr,
+    ]
+    return truncate(redact("\n".join(output)), 12000)
+
+
+def run_tool_calls(tool_calls):
+    tool_messages = []
+    for tool_call in tool_calls:
+        function = tool_call.get("function") or {}
+        name = function.get("name")
+        arguments = function.get("arguments")
+        if name != "Shell":
+            content = f"unsupported tool: {name}"
+        else:
+            content = run_shell_tool(arguments)
+        tool_messages.append(
+            {
+                "role": "tool",
+                "tool_call_id": tool_call.get("id", ""),
+                "content": content,
+            }
+        )
+    return tool_messages
+
+
 api_key = required_env("OPENAI_API_KEY")
 base_url = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
 model = os.environ.get("OPENAI_MODEL", "gpt-4.1")
 temperature = float(os.environ.get("OPENAI_TEMPERATURE", "1"))
 max_tokens = int(os.environ.get("OPENAI_MAX_TOKENS", "24000"))
+max_tool_rounds = int(os.environ.get("OPENAI_MAX_TOOL_ROUNDS", "8"))
 with open(required_env("AI_FACTORY_PROMPT_FILE"), "r", encoding="utf-8") as prompt_handle:
     prompt = prompt_handle.read()
 if not prompt.strip():
@@ -118,55 +186,98 @@ Use small, focused edits. Run local checks when practical.
 Do not print secrets. Do not commit, push, or open pull requests.
 ai-factory will run validation, commit, push, and create the change request after you exit.
 """
-request = {
-    "model": model,
-    "messages": [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": prompt},
-    ],
-    "temperature": temperature,
-    "max_tokens": max_tokens,
-}
-data = json.dumps(request).encode("utf-8")
-http_request = urllib.request.Request(
-    f"{base_url}/chat/completions",
-    data=data,
-    headers={
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-    },
-    method="POST",
-)
-try:
-    with urllib.request.urlopen(http_request, timeout=300) as response:
-        response_body = response.read()
-except urllib.error.HTTPError as exc:
-    detail = exc.read().decode("utf-8", errors="replace")
-    print(f"OpenAI-compatible API request failed: HTTP {exc.code}", file=sys.stderr)
-    print(detail, file=sys.stderr)
-    sys.exit(1)
-except urllib.error.URLError as exc:
-    print(f"OpenAI-compatible API request failed: {exc}", file=sys.stderr)
-    sys.exit(1)
+messages = [
+    {"role": "system", "content": system_prompt},
+    {"role": "user", "content": prompt},
+]
+tools = [
+    {
+        "type": "function",
+        "function": {
+            "name": "Shell",
+            "description": "Run a shell command in the checked-out repository and return stdout, stderr, and exit code.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "command": {
+                        "type": "string",
+                        "description": "The shell command to run.",
+                    }
+                },
+                "required": ["command"],
+            },
+        },
+    }
+]
 
-try:
-    payload = json.loads(response_body)
-except json.JSONDecodeError as exc:
-    print(f"OpenAI-compatible API response was not valid JSON: {exc}", file=sys.stderr)
-    print(truncate(response_body.decode("utf-8", errors="replace")), file=sys.stderr)
-    sys.exit(1)
+content = ""
+payload = {}
+for round_index in range(max_tool_rounds + 1):
+    request = {
+        "model": model,
+        "messages": messages,
+        "tools": tools,
+        "tool_choice": "auto",
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+    }
+    data = json.dumps(request).encode("utf-8")
+    http_request = urllib.request.Request(
+        f"{base_url}/chat/completions",
+        data=data,
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(http_request, timeout=300) as response:
+            response_body = response.read()
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        print(f"OpenAI-compatible API request failed: HTTP {exc.code}", file=sys.stderr)
+        print(detail, file=sys.stderr)
+        sys.exit(1)
+    except urllib.error.URLError as exc:
+        print(f"OpenAI-compatible API request failed: {exc}", file=sys.stderr)
+        sys.exit(1)
 
-try:
-    choice = payload["choices"][0]
-    message = choice["message"]
-    content = message.get("content") or ""
-except (KeyError, IndexError, TypeError) as exc:
-    print(f"OpenAI-compatible API response did not contain choices[0].message.content: {exc}", file=sys.stderr)
+    try:
+        payload = json.loads(response_body)
+    except json.JSONDecodeError as exc:
+        print(f"OpenAI-compatible API response was not valid JSON: {exc}", file=sys.stderr)
+        print(truncate(response_body.decode("utf-8", errors="replace")), file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        choice = payload["choices"][0]
+        message = choice["message"]
+        content = message.get("content") or ""
+        tool_calls = message.get("tool_calls") or []
+    except (KeyError, IndexError, TypeError) as exc:
+        print(f"OpenAI-compatible API response did not contain choices[0].message.content: {exc}", file=sys.stderr)
+        dump_response_diagnostics(payload)
+        print(response_preview(payload), file=sys.stderr)
+        sys.exit(1)
+
     dump_response_diagnostics(payload)
-    print(response_preview(payload), file=sys.stderr)
-    sys.exit(1)
+    if tool_calls:
+        if round_index >= max_tool_rounds:
+            print(f"OpenAI-compatible model exceeded max tool rounds ({max_tool_rounds})", file=sys.stderr)
+            print(response_preview(payload), file=sys.stderr)
+            sys.exit(1)
+        messages.append(
+            {
+                "role": "assistant",
+                "content": content,
+                "tool_calls": tool_calls,
+            }
+        )
+        messages.extend(run_tool_calls(tool_calls))
+        continue
+    break
 
-dump_response_diagnostics(payload)
 script = strip_code_fence(content)
 if not script:
     print("OpenAI-compatible model returned an empty script", file=sys.stderr)
