@@ -172,7 +172,7 @@ shell script, and executes that script in the cloned repository. It uses:
 | `OPENAI_API_KEY` | required | API key for the compatible provider. |
 | `OPENAI_BASE_URL` | `https://api.openai.com/v1` | API base URL. For Kimi, use `https://api.moonshot.cn/v1`. |
 | `OPENAI_MODEL` | `gpt-4.1` | Model name for the provider. |
-| `OPENAI_TEMPERATURE` | `0.2` | Sampling temperature. |
+| `OPENAI_TEMPERATURE` | `1` | Sampling temperature. |
 | `OPENAI_MAX_TOKENS` | `6000` | Maximum response tokens for the generated script. |
 
 ## Sandbox git authentication
