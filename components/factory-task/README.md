@@ -175,7 +175,7 @@ shell script, and executes that script in the cloned repository. It uses:
 | `OPENAI_MODEL` | `gpt-4.1` | Model name for the provider. |
 | `OPENAI_TEMPERATURE` | `1` | Sampling temperature. |
 | `OPENAI_MAX_TOKENS` | `24000` | Maximum response tokens for the generated script. |
-| `OPENAI_MAX_TOOL_ROUNDS` | `8` | Maximum Shell tool call rounds before the model must return a script. |
+| `OPENAI_MAX_TOOL_ROUNDS` | `20` | Maximum Shell tool call rounds before the model must return a script. |
 
 ## Sandbox git authentication
 

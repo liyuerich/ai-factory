@@ -20,7 +20,7 @@ Optional environment:
   OPENAI_MODEL         default: gpt-4.1
   OPENAI_TEMPERATURE   default: 1
   OPENAI_MAX_TOKENS    default: 24000
-  OPENAI_MAX_TOOL_ROUNDS default: 8
+  OPENAI_MAX_TOOL_ROUNDS default: 20
 EOF
 }
 
@@ -170,7 +170,7 @@ base_url = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip
 model = os.environ.get("OPENAI_MODEL", "gpt-4.1")
 temperature = float(os.environ.get("OPENAI_TEMPERATURE", "1"))
 max_tokens = int(os.environ.get("OPENAI_MAX_TOKENS", "24000"))
-max_tool_rounds = int(os.environ.get("OPENAI_MAX_TOOL_ROUNDS", "8"))
+max_tool_rounds = int(os.environ.get("OPENAI_MAX_TOOL_ROUNDS", "20"))
 with open(required_env("AI_FACTORY_PROMPT_FILE"), "r", encoding="utf-8") as prompt_handle:
     prompt = prompt_handle.read()
 if not prompt.strip():
@@ -212,15 +212,31 @@ tools = [
 
 content = ""
 payload = {}
-for round_index in range(max_tool_rounds + 1):
+final_script_prompt_added = False
+for round_index in range(max_tool_rounds + 2):
+    final_script_round = round_index > max_tool_rounds
+    if final_script_round and not final_script_prompt_added:
+        messages.append(
+            {
+                "role": "user",
+                "content": (
+                    "You have reached the Shell tool limit. Do not call more tools. "
+                    "Return only the final POSIX shell script now."
+                ),
+            }
+        )
+        final_script_prompt_added = True
     request = {
         "model": model,
         "messages": messages,
-        "tools": tools,
-        "tool_choice": "auto",
         "temperature": temperature,
         "max_tokens": max_tokens,
     }
+    if final_script_round:
+        request["tool_choice"] = "none"
+    else:
+        request["tools"] = tools
+        request["tool_choice"] = "auto"
     data = json.dumps(request).encode("utf-8")
     http_request = urllib.request.Request(
         f"{base_url}/chat/completions",
@@ -264,9 +280,8 @@ for round_index in range(max_tool_rounds + 1):
     dump_response_diagnostics(payload)
     if tool_calls:
         if round_index >= max_tool_rounds:
-            print(f"OpenAI-compatible model exceeded max tool rounds ({max_tool_rounds})", file=sys.stderr)
-            print(response_preview(payload), file=sys.stderr)
-            sys.exit(1)
+            print(f"OpenAI-compatible model reached max tool rounds ({max_tool_rounds}); requesting final script without tools", file=sys.stderr)
+            continue
         messages.append(
             {
                 "role": "assistant",
