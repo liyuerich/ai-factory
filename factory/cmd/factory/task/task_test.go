@@ -17,13 +17,14 @@ package task
 import (
 	"bytes"
 	"encoding/json"
-	"net/http"
-	"net/http/httptest"
-	"strings"
-	"testing"
-
 	taskpkg "github.com/ai-on-gke/ai-factory/factory/pkg/task"
 	"github.com/spf13/cobra"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
 )
 
 func TestShouldReconcile(t *testing.T) {
@@ -198,5 +199,90 @@ func TestIssueWebhookHandlerIgnoresMissingRequiredLabel(t *testing.T) {
 	}
 	if !strings.Contains(resp.Body.String(), `"ignored":true`) {
 		t.Fatalf("body = %s, want ignored response", resp.Body.String())
+	}
+}
+
+func TestPlanDryRunValid(t *testing.T) {
+	content := []byte(`apiVersion: factory.ai.gke.io/v1alpha1
+kind: FactoryTask
+metadata:
+  name: dry-run-task
+spec:
+  source:
+    provider: github
+    repository: liyuerich/ai-factory
+    baseRef: main
+  agent:
+    name: builder
+  sandbox:
+    templateRef: go-dev
+  work:
+    instructions: "Do some work"
+`)
+	tmpDir := t.TempDir()
+	p := filepath.Join(tmpDir, "task.yaml")
+	if err := os.WriteFile(p, content, 0644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	buf := &bytes.Buffer{}
+	cmd := &cobra.Command{}
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	if err := planDryRunCmd.RunE(cmd, []string{p}); err != nil {
+		t.Fatalf("plan-dry-run failed: %v\noutput:\n%s", err, buf.String())
+	}
+
+	out := buf.String()
+	for _, want := range []string{
+		"taskName: dry-run-task",
+		"provider: github",
+		"repository: liyuerich/ai-factory",
+		"steps:",
+		"clone repository",
+		"run coding agent",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("output missing %q; got:\n%s", want, out)
+		}
+	}
+}
+
+func TestPlanDryRunInvalid(t *testing.T) {
+	content := []byte(`apiVersion: factory.ai.gke.io/v1alpha1
+kind: FactoryTask
+metadata:
+  name: dry-run-invalid
+spec:
+  source:
+    provider: github
+    repository: liyuerich/ai-factory
+    baseRef: main
+  agent:
+    name: ""
+  sandbox:
+    templateRef: go-dev
+  work:
+    instructions: "Do some work"
+`)
+	tmpDir := t.TempDir()
+	p := filepath.Join(tmpDir, "task.yaml")
+	if err := os.WriteFile(p, content, 0644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	buf := &bytes.Buffer{}
+	cmd := &cobra.Command{}
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	err := planDryRunCmd.RunE(cmd, []string{p})
+	if err == nil {
+		t.Fatalf("expected error for invalid FactoryTask, got output:\n%s", buf.String())
+	}
+	if !strings.Contains(err.Error(), "invalid FactoryTask YAML") {
+		t.Fatalf("error should mention invalid FactoryTask YAML: %v", err)
+	}
+	if buf.Len() != 0 {
+		t.Fatalf("expected no output for invalid YAML, got:\n%s", buf.String())
 	}
 }

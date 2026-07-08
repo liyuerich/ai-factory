@@ -23,29 +23,29 @@ import (
 
 // ExecutionPlan is the normalized controller input produced from a FactoryTask.
 type ExecutionPlan struct {
-	TaskName        string
-	Provider        string
-	Repository      string
-	CloneURL        string
-	BaseRef         string
-	ChangeBranch    string
-	TargetBranch    string
-	GitAuthTokenEnv string
-	GitAuthUsername string
-	AgentName       string
-	AgentCommand    string
-	AgentPromptRef  string
-	SandboxTemplate string
-	SandboxClaim    string
-	ContainerName   string
-	WorkDir         string
-	Steps           []ExecutionStep
+	TaskName        string          `yaml:"taskName"`
+	Provider        string          `yaml:"provider"`
+	Repository      string          `yaml:"repository"`
+	CloneURL        string          `yaml:"cloneURL"`
+	BaseRef         string          `yaml:"baseRef"`
+	ChangeBranch    string          `yaml:"changeBranch,omitempty"`
+	TargetBranch    string          `yaml:"targetBranch,omitempty"`
+	GitAuthTokenEnv string          `yaml:"gitAuthTokenEnv,omitempty"`
+	GitAuthUsername string          `yaml:"gitAuthUsername,omitempty"`
+	AgentName       string          `yaml:"agentName"`
+	AgentCommand    string          `yaml:"agentCommand"`
+	AgentPromptRef  string          `yaml:"agentPromptRef,omitempty"`
+	SandboxTemplate string          `yaml:"sandboxTemplate"`
+	SandboxClaim    string          `yaml:"sandboxClaim"`
+	ContainerName   string          `yaml:"containerName"`
+	WorkDir         string          `yaml:"workDir"`
+	Steps           []ExecutionStep `yaml:"steps"`
 }
 
 // ExecutionStep describes one high-level action for a future controller.
 type ExecutionStep struct {
-	Name    string
-	Command []string
+	Name    string   `yaml:"name"`
+	Command []string `yaml:"command"`
 }
 
 // BuildExecutionPlan normalizes provider-specific source details into the
