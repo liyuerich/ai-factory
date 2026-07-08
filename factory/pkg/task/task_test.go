@@ -253,6 +253,10 @@ spec:
 	if !strings.Contains(authCommand, "GITHUB_TOKEN is required in the sandbox environment for git clone/push") {
 		t.Fatalf("auth command = %#v", plan.Steps[0].Command)
 	}
+	runCommand := strings.Join(plan.Steps[4].Command, " ")
+	if !strings.Contains(runCommand, "export PATH=/usr/local/go/bin:$PATH") {
+		t.Fatalf("run command should include sandbox toolchain PATH, got %#v", plan.Steps[4].Command)
+	}
 	commitStep := plan.Steps[5]
 	commitCommand := strings.Join(commitStep.Command, " ")
 	if !strings.Contains(commitCommand, "rm -f .ai-factory/agent-prompt.md .ai-factory/task-instructions.md") {

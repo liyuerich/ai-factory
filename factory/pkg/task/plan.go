@@ -131,7 +131,7 @@ func BuildExecutionPlan(task *FactoryTask) (*ExecutionPlan, error) {
 	for i, command := range task.Spec.Work.Commands {
 		plan.Steps = append(plan.Steps, ExecutionStep{
 			Name:    fmt.Sprintf("run command %d", i+1),
-			Command: []string{"/bin/sh", "-lc", fmt.Sprintf("cd %s && %s", shellQuote(workDir), command)},
+			Command: []string{"/bin/sh", "-lc", fmt.Sprintf("cd %s && export PATH=/usr/local/go/bin:$PATH && %s", shellQuote(workDir), command)},
 		})
 	}
 
