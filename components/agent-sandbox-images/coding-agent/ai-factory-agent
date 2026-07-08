@@ -21,6 +21,7 @@ Optional environment:
   OPENAI_TEMPERATURE   default: 1
   OPENAI_MAX_TOKENS    default: 24000
   OPENAI_MAX_TOOL_ROUNDS default: 20
+  OPENAI_MAX_REPAIR_ROUNDS default: 2
 EOF
 }
 
@@ -99,6 +100,37 @@ def response_preview(payload):
         return truncate(payload, 4000)
 
 
+def post_chat_completion(request, base_url, api_key):
+    data = json.dumps(request).encode("utf-8")
+    http_request = urllib.request.Request(
+        f"{base_url}/chat/completions",
+        data=data,
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(http_request, timeout=300) as response:
+            response_body = response.read()
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        print(f"OpenAI-compatible API request failed: HTTP {exc.code}", file=sys.stderr)
+        print(detail, file=sys.stderr)
+        sys.exit(1)
+    except urllib.error.URLError as exc:
+        print(f"OpenAI-compatible API request failed: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        return json.loads(response_body)
+    except json.JSONDecodeError as exc:
+        print(f"OpenAI-compatible API response was not valid JSON: {exc}", file=sys.stderr)
+        print(truncate(response_body.decode("utf-8", errors="replace")), file=sys.stderr)
+        sys.exit(1)
+
+
 def redact(text):
     secret_names = (
         "OPENAI_API_KEY",
@@ -165,12 +197,45 @@ def run_tool_calls(tool_calls):
     return tool_messages
 
 
+def write_script(script):
+    with tempfile.NamedTemporaryFile("w", prefix="ai-factory-agent-", suffix=".sh", delete=False) as handle:
+        handle.write("#!/usr/bin/env bash\nset -euo pipefail\n")
+        handle.write(script)
+        handle.write("\n")
+        script_path = handle.name
+    os.chmod(script_path, os.stat(script_path).st_mode | stat.S_IXUSR)
+    return script_path
+
+
+def run_generated_script(script, model, label):
+    script_path = write_script(script)
+    print(f"--- RUN: OpenAI-compatible {label} script ({model})")
+    try:
+        completed = subprocess.run(
+            ["/bin/bash", script_path],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    finally:
+        try:
+            os.unlink(script_path)
+        except OSError:
+            pass
+    if completed.stdout:
+        print(redact(completed.stdout), end="")
+    if completed.stderr:
+        print(redact(completed.stderr), end="", file=sys.stderr)
+    return completed
+
+
 api_key = required_env("OPENAI_API_KEY")
 base_url = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
 model = os.environ.get("OPENAI_MODEL", "gpt-4.1")
 temperature = float(os.environ.get("OPENAI_TEMPERATURE", "1"))
 max_tokens = int(os.environ.get("OPENAI_MAX_TOKENS", "24000"))
 max_tool_rounds = int(os.environ.get("OPENAI_MAX_TOOL_ROUNDS", "20"))
+max_repair_rounds = int(os.environ.get("OPENAI_MAX_REPAIR_ROUNDS", "2"))
 with open(required_env("AI_FACTORY_PROMPT_FILE"), "r", encoding="utf-8") as prompt_handle:
     prompt = prompt_handle.read()
 if not prompt.strip():
@@ -238,34 +303,7 @@ for round_index in range(max_tool_rounds + 2):
     else:
         request["tools"] = tools
         request["tool_choice"] = "auto"
-    data = json.dumps(request).encode("utf-8")
-    http_request = urllib.request.Request(
-        f"{base_url}/chat/completions",
-        data=data,
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(http_request, timeout=300) as response:
-            response_body = response.read()
-    except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace")
-        print(f"OpenAI-compatible API request failed: HTTP {exc.code}", file=sys.stderr)
-        print(detail, file=sys.stderr)
-        sys.exit(1)
-    except urllib.error.URLError as exc:
-        print(f"OpenAI-compatible API request failed: {exc}", file=sys.stderr)
-        sys.exit(1)
-
-    try:
-        payload = json.loads(response_body)
-    except json.JSONDecodeError as exc:
-        print(f"OpenAI-compatible API response was not valid JSON: {exc}", file=sys.stderr)
-        print(truncate(response_body.decode("utf-8", errors="replace")), file=sys.stderr)
-        sys.exit(1)
+    payload = post_chat_completion(request, base_url, api_key)
 
     try:
         choice = payload["choices"][0]
@@ -300,20 +338,64 @@ if not script:
     print(response_preview(payload), file=sys.stderr)
     sys.exit(1)
 
-with tempfile.NamedTemporaryFile("w", prefix="ai-factory-agent-", suffix=".sh", delete=False) as handle:
-    handle.write("#!/usr/bin/env bash\nset -euo pipefail\n")
-    handle.write(script)
-    handle.write("\n")
-    script_path = handle.name
-os.chmod(script_path, os.stat(script_path).st_mode | stat.S_IXUSR)
-print(f"--- RUN: OpenAI-compatible generated script ({model})")
-try:
-    completed = subprocess.run(["/bin/bash", script_path], check=False)
-finally:
+completed = run_generated_script(script, model, "generated")
+for repair_index in range(max_repair_rounds):
+    if completed.returncode == 0:
+        break
+    failure_output = truncate(
+        redact(
+            "\n".join(
+                [
+                    f"exit_code={completed.returncode}",
+                    "--- stdout ---",
+                    completed.stdout or "",
+                    "--- stderr ---",
+                    completed.stderr or "",
+                ]
+            )
+        ),
+        12000,
+    )
+    print(f"OpenAI-compatible generated script failed; requesting repair script ({repair_index + 1}/{max_repair_rounds})", file=sys.stderr)
+    messages.append({"role": "assistant", "content": content})
+    messages.append(
+        {
+            "role": "user",
+            "content": (
+                "The shell script you generated failed when ai-factory executed it. "
+                "The repository is left in its current modified state. "
+                "Return only a POSIX shell script that repairs the current state and reruns the relevant checks. "
+                "Do not explain, do not use Markdown, do not commit, do not push.\n\n"
+                f"{failure_output}"
+            ),
+        }
+    )
+    repair_payload = post_chat_completion(
+        {
+            "model": model,
+            "messages": messages,
+            "tool_choice": "none",
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+        },
+        base_url,
+        api_key,
+    )
+    dump_response_diagnostics(repair_payload)
     try:
-        os.unlink(script_path)
-    except OSError:
-        pass
+        repair_message = repair_payload["choices"][0]["message"]
+        content = repair_message.get("content") or ""
+    except (KeyError, IndexError, TypeError) as exc:
+        print(f"OpenAI-compatible repair response did not contain choices[0].message.content: {exc}", file=sys.stderr)
+        print(response_preview(repair_payload), file=sys.stderr)
+        sys.exit(1)
+    script = strip_code_fence(content)
+    if not script:
+        print("OpenAI-compatible model returned an empty repair script", file=sys.stderr)
+        print(response_preview(repair_payload), file=sys.stderr)
+        sys.exit(1)
+    completed = run_generated_script(script, model, f"repair {repair_index + 1}")
+
 sys.exit(completed.returncode)
 PY
 }
