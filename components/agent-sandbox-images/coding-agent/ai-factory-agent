@@ -54,6 +54,50 @@ def strip_code_fence(text):
     return text.strip()
 
 
+def truncate(value, limit=4000):
+    text = str(value)
+    if len(text) <= limit:
+        return text
+    return text[:limit] + f"... <truncated {len(text) - limit} chars>"
+
+
+def dump_response_diagnostics(payload):
+    print("OpenAI-compatible response diagnostics:", file=sys.stderr)
+    print(f"  id: {payload.get('id', '<missing>')}", file=sys.stderr)
+    print(f"  object: {payload.get('object', '<missing>')}", file=sys.stderr)
+    print(f"  model: {payload.get('model', '<missing>')}", file=sys.stderr)
+    print(f"  top-level keys: {sorted(payload.keys())}", file=sys.stderr)
+    choices = payload.get("choices")
+    if not isinstance(choices, list) or not choices:
+        print(f"  choices: {type(choices).__name__} {truncate(choices)}", file=sys.stderr)
+        return
+    choice = choices[0]
+    print(f"  choice[0] keys: {sorted(choice.keys())}", file=sys.stderr)
+    print(f"  choice[0].finish_reason: {choice.get('finish_reason', '<missing>')}", file=sys.stderr)
+    message = choice.get("message")
+    if not isinstance(message, dict):
+        print(f"  choice[0].message: {type(message).__name__} {truncate(message)}", file=sys.stderr)
+        return
+    print(f"  message keys: {sorted(message.keys())}", file=sys.stderr)
+    for key in ("role", "content", "reasoning_content", "tool_calls", "function_call", "refusal"):
+        if key in message:
+            value = message.get(key)
+            if isinstance(value, str):
+                print(f"  message.{key}: string len={len(value)} preview={truncate(value, 800)!r}", file=sys.stderr)
+            else:
+                print(f"  message.{key}: {type(value).__name__} {truncate(value, 1200)}", file=sys.stderr)
+    usage = payload.get("usage")
+    if usage is not None:
+        print(f"  usage: {truncate(usage, 1200)}", file=sys.stderr)
+
+
+def response_preview(payload):
+    try:
+        return truncate(json.dumps(payload, ensure_ascii=False, sort_keys=True), 4000)
+    except (TypeError, ValueError):
+        return truncate(payload, 4000)
+
+
 api_key = required_env("OPENAI_API_KEY")
 base_url = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
 model = os.environ.get("OPENAI_MODEL", "gpt-4.1")
@@ -105,15 +149,26 @@ except urllib.error.URLError as exc:
 
 try:
     payload = json.loads(response_body)
-    content = payload["choices"][0]["message"]["content"]
-except (KeyError, IndexError, json.JSONDecodeError) as exc:
-    print(f"OpenAI-compatible API response did not contain choices[0].message.content: {exc}", file=sys.stderr)
-    print(response_body.decode("utf-8", errors="replace"), file=sys.stderr)
+except json.JSONDecodeError as exc:
+    print(f"OpenAI-compatible API response was not valid JSON: {exc}", file=sys.stderr)
+    print(truncate(response_body.decode("utf-8", errors="replace")), file=sys.stderr)
     sys.exit(1)
 
+try:
+    choice = payload["choices"][0]
+    message = choice["message"]
+    content = message.get("content") or ""
+except (KeyError, IndexError, TypeError) as exc:
+    print(f"OpenAI-compatible API response did not contain choices[0].message.content: {exc}", file=sys.stderr)
+    dump_response_diagnostics(payload)
+    print(response_preview(payload), file=sys.stderr)
+    sys.exit(1)
+
+dump_response_diagnostics(payload)
 script = strip_code_fence(content)
 if not script:
     print("OpenAI-compatible model returned an empty script", file=sys.stderr)
+    print(response_preview(payload), file=sys.stderr)
     sys.exit(1)
 
 with tempfile.NamedTemporaryFile("w", prefix="ai-factory-agent-", suffix=".sh", delete=False) as handle:
