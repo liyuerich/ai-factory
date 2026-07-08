@@ -29,6 +29,7 @@ import (
 
 	taskpkg "github.com/ai-on-gke/ai-factory/factory/pkg/task"
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v2"
 )
 
 // Cmd represents the task command.
@@ -92,6 +93,33 @@ var planCmd = &cobra.Command{
 		for _, step := range plan.Steps {
 			fmt.Fprintf(out, "- %s: %s\n", step.Name, strings.Join(step.Command, " "))
 		}
+		return nil
+	},
+}
+
+var planDryRunCmd = &cobra.Command{
+	Use:   "plan-dry-run [file]",
+	Short: "Render the execution plan for a FactoryTask YAML file without creating resources",
+	Long:  `Parses and validates a FactoryTask YAML, builds the execution plan, and prints the plan as YAML. No Kubernetes resources are created and no cluster is required.`,
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		data, err := os.ReadFile(args[0])
+		if err != nil {
+			return fmt.Errorf("read task file: %w", err)
+		}
+		task, err := taskpkg.Parse(data)
+		if err != nil {
+			return fmt.Errorf("invalid FactoryTask YAML: %w", err)
+		}
+		plan, err := taskpkg.BuildExecutionPlan(task)
+		if err != nil {
+			return fmt.Errorf("build execution plan: %w", err)
+		}
+		out, err := yaml.Marshal(plan)
+		if err != nil {
+			return fmt.Errorf("marshal plan: %w", err)
+		}
+		fmt.Fprintln(cmd.OutOrStdout(), string(out))
 		return nil
 	},
 }
@@ -403,6 +431,7 @@ var patchStatusCmd = &cobra.Command{
 func init() {
 	Cmd.AddCommand(validateCmd)
 	Cmd.AddCommand(planCmd)
+	Cmd.AddCommand(planDryRunCmd)
 	Cmd.AddCommand(reportCmd)
 	Cmd.AddCommand(changeRequestCmd)
 	Cmd.AddCommand(webhookCmd)
