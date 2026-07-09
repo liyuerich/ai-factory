@@ -146,7 +146,7 @@ jobs:
         RESULT_EXPECTATION="FactoryTask to succeed"
         if jq -e '.issue.labels[]?.name == "ai-factory-smoke"' "${GITHUB_EVENT_PATH}" >/dev/null; then
           CHANGE_REQUEST=true
-          TASK_COMMAND="mkdir -p .ai-factory/smoke && printf 'issue=%s\nrun=%s\n' '${ISSUE_NUMBER}' '${GITHUB_RUN_ID}' > .ai-factory/smoke/issue-${ISSUE_NUMBER}.txt && ${FACTORY_SMOKE_COMMAND}"
+          TASK_COMMAND="mkdir -p .ai-factory/smoke && printf 'issue=%s\\nrun=%s\\n' '${ISSUE_NUMBER}' '${GITHUB_RUN_ID}' > .ai-factory/smoke/issue-${ISSUE_NUMBER}.txt && ${FACTORY_SMOKE_COMMAND}"
           RESULT_EXPECTATION="an ai-factory-smoke change request URL or an existing PR status"
         elif jq -e '.issue.labels[]?.name == "ai-factory-run"' "${GITHUB_EVENT_PATH}" >/dev/null; then
           CHANGE_REQUEST=true
@@ -203,6 +203,11 @@ jobs:
         fi
 
         kubectl get factorytask "${TASK_NAME}" -n default -o yaml
+
+        RUN_URL="${GITHUB_SERVER_URL}/${FACTORY_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+        COMMENT_BODY=$(printf 'ai-factory started processing this issue.\\n\\n- FactoryTask: %s\\n- GitHub Actions run: %s' "${TASK_NAME}" "${RUN_URL}")
+        gh issue comment "${ISSUE_NUMBER}" --body "${COMMENT_BODY}"
+
         kubectl wait sandboxwarmpool go-dev -n default --for=jsonpath='{.status.readyReplicas}'=1 --timeout=180s
         go run ./factory/cmd/factory task controller watch \
           -n default \
