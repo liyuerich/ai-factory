@@ -16,7 +16,7 @@ name: Issue FactoryTask
 
 permissions:
   contents: write
-  issues: read
+  issues: write
   pull-requests: write
 
 on:
@@ -182,7 +182,7 @@ jobs:
           --command "${TASK_COMMAND}" \
           --change-request="${CHANGE_REQUEST}" \
           --change-request-auth-token-env AI_FACTORY_GITHUB_TOKEN \
-          --reporting-mode "" \
+          --reporting-mode disabled \
           > "${RUNNER_TEMP}/webhook.log" 2>&1 &
         WEBHOOK_PID=$!
         trap 'kill "${WEBHOOK_PID}" 2>/dev/null || true' EXIT
@@ -210,7 +210,7 @@ jobs:
           --interval=1s \
           --timeout=180s \
           --create-change-request="${CHANGE_REQUEST}" \
-          --report=false
+          --report=true
         TASK_PHASE=""
         for _ in $(seq 1 60); do
           TASK_PHASE="$(kubectl get factorytask "${TASK_NAME}" -n default -o jsonpath='{.status.phase}')"
