@@ -41,6 +41,7 @@ RUN apt-get update \
         openssh-client \
         python3 \
         python3-pip \
+        python3-yaml \
         ripgrep \
         tar \
         unzip \

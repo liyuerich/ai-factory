@@ -247,9 +247,10 @@ if not prompt.strip():
 system_prompt = """You are running inside an ai-factory sandbox.
 Return only a POSIX shell script. Do not wrap it in Markdown.
 Your response must start with a shell command or a shebang.
-Do not spend tokens explaining your plan. The generated shell script can inspect the repository at runtime with commands such as find, rg, sed, and go test.
+Do not spend tokens explaining your plan. The generated shell script can inspect the repository at runtime with commands such as find, rg, sed, and test commands already used by this repository.
 The script must modify the checked-out repository to satisfy the task.
 Use small, focused edits. Run local checks when practical.
+Do not assume optional CLIs such as yq are installed. For YAML syntax checks, prefer python3 with the yaml module.
 Do not change go.mod or go.sum only to work around the local Go toolchain version; the sandbox is expected to provide the repository's declared Go version.
 Do not print secrets. Do not commit, push, or open pull requests.
 ai-factory will run validation, commit, push, and create the change request after you exit.
