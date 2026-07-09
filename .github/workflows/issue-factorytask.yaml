@@ -25,9 +25,13 @@ on:
     - reopened
     - labeled
 
+concurrency:
+  group: issue-factorytask-${{ github.event.repository.full_name }}-${{ github.event.issue.number }}
+  cancel-in-progress: true
+
 jobs:
   issue-factorytask:
-    if: contains(github.event.issue.labels.*.name, 'ai-factory')
+    if: contains(github.event.issue.labels.*.name, 'ai-factory') && (contains(github.event.issue.labels.*.name, 'ai-factory-run') || contains(github.event.issue.labels.*.name, 'ai-factory-smoke'))
     runs-on: ubuntu-latest
     timeout-minutes: 45
 
