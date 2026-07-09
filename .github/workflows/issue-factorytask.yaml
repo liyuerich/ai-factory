@@ -205,7 +205,7 @@ jobs:
         kubectl get factorytask "${TASK_NAME}" -n default -o yaml
 
         RUN_URL="${GITHUB_SERVER_URL}/${FACTORY_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-        COMMENT_BODY=$(printf 'ai-factory started processing this issue.\\n\\n- FactoryTask: %s\\n- GitHub Actions run: %s' "${TASK_NAME}" "${RUN_URL}")
+        COMMENT_BODY=$(printf 'ai-factory started processing this issue.\n\n- FactoryTask: %s\n- GitHub Actions run: %s' "${TASK_NAME}" "${RUN_URL}")
         gh issue comment "${ISSUE_NUMBER}" --body "${COMMENT_BODY}"
 
         kubectl wait sandboxwarmpool go-dev -n default --for=jsonpath='{.status.readyReplicas}'=1 --timeout=180s
@@ -246,3 +246,42 @@ jobs:
         ISSUE_NUMBER="${{ github.event.issue.number }}"
         TASK_REPOSITORY="$(printf '%s' "${{ github.event.repository.full_name }}" | tr '[:upper:]/_' '[:lower:]--')"
         kubectl get factorytask "github-${TASK_REPOSITORY}-${ISSUE_NUMBER}" -n default -o yaml || true
+
+    - name: Report issue FactoryTask failure
+      if: failure()
+      env:
+        FACTORY_REPOSITORY: ${{ github.event.repository.full_name }}
+        ISSUE_NUMBER: ${{ github.event.issue.number }}
+        GITHUB_TOKEN: ${{ github.token }}
+        OPENAI_API_KEY: ${{ secrets.AI_FACTORY_OPENAI_API_KEY || secrets.OPENAI_API_KEY }}
+        AI_FACTORY_RUN_AGENT_COMMAND: ${{ vars.AI_FACTORY_RUN_AGENT_COMMAND || 'ai-factory-agent openai-compatible' }}
+      run: |
+        TASK_REPOSITORY="$(printf '%s' "${FACTORY_REPOSITORY}" | tr '[:upper:]/_' '[:lower:]--')"
+        TASK_NAME="github-${TASK_REPOSITORY}-${ISSUE_NUMBER}"
+        RUN_URL="${GITHUB_SERVER_URL}/${FACTORY_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+
+        PHASE=""
+        REASON=""
+        MESSAGE=""
+        if kubectl get factorytask "${TASK_NAME}" -n default >/dev/null 2>&1; then
+          PHASE="$(kubectl get factorytask "${TASK_NAME}" -n default -o jsonpath='{.status.phase}' 2>/dev/null || true)"
+          REASON="$(kubectl get factorytask "${TASK_NAME}" -n default -o jsonpath='{.status.conditions[-1:].reason}' 2>/dev/null || true)"
+          MESSAGE="$(kubectl get factorytask "${TASK_NAME}" -n default -o jsonpath='{.status.lastMessage}' 2>/dev/null || true)"
+        fi
+
+        if [[ -z "${MESSAGE}" && "${AI_FACTORY_RUN_AGENT_COMMAND}" == *"openai-compatible"* && -z "${OPENAI_API_KEY}" ]]; then
+          REASON="MissingOpenAICompatibleAPIKey"
+          MESSAGE="AI_FACTORY_OPENAI_API_KEY or OPENAI_API_KEY repository secret is required."
+        fi
+        if [[ -z "${PHASE}" ]]; then
+          PHASE="WorkflowFailed"
+        fi
+        if [[ -z "${REASON}" ]]; then
+          REASON="WorkflowFailed"
+        fi
+        if [[ -z "${MESSAGE}" ]]; then
+          MESSAGE="Workflow failed before FactoryTask reported a detailed message. Check the Actions run logs."
+        fi
+
+        COMMENT_BODY=$(printf 'FactoryTask `%s/%s` failed.\n\n- GitHub Actions run: %s\n- Phase: %s\n- Reason: %s\n- Message: %s' "default" "${TASK_NAME}" "${RUN_URL}" "${PHASE}" "${REASON}" "${MESSAGE}")
+        gh issue comment "${ISSUE_NUMBER}" --body "${COMMENT_BODY}"
