@@ -203,6 +203,11 @@ jobs:
         fi
 
         kubectl get factorytask "${TASK_NAME}" -n default -o yaml
+
+        RUN_URL="${GITHUB_SERVER_URL}/${FACTORY_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+        COMMENT_BODY=$(printf 'ai-factory started processing this issue.\\n\\n- FactoryTask: %s\\n- GitHub Actions run: %s' "${TASK_NAME}" "${RUN_URL}")
+        gh issue comment "${ISSUE_NUMBER}" --body "${COMMENT_BODY}"
+
         kubectl wait sandboxwarmpool go-dev -n default --for=jsonpath='{.status.readyReplicas}'=1 --timeout=180s
         go run ./factory/cmd/factory task controller watch \
           -n default \
