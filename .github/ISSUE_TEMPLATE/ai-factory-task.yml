@@ -1,0 +1,50 @@
+name: AI Factory Task
+description: Submit a coding task to be handled by the AI factory.
+labels: ["ai-factory-run"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe the coding task you want the AI factory to perform. Keep the goal focused and include clear acceptance criteria.
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      description: What should the AI factory accomplish?
+      placeholder: e.g. Add a REST endpoint for listing factory tasks.
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Files or areas to change
+      description: Point the AI factory to relevant files, packages, or components.
+      placeholder: e.g. pkg/api/server.go, components/factory-task/
+    validations:
+      required: false
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: How will we know the task is complete?
+      placeholder: |
+        - [ ] New endpoint returns task list
+        - [ ] Tests cover the handler
+        - [ ] OpenAPI docs updated
+    validations:
+      required: true
+  - type: dropdown
+    id: allow_pr
+    attributes:
+      label: Allow creating a pull request
+      description: Is the AI factory allowed to create a PR for this task?
+      options:
+        - "Yes"
+        - "No"
+      default: 0
+    validations:
+      required: true
+  - type: markdown
+    attributes:
+      value: |
+        The `ai-factory-run` label is applied automatically. Remove it if you want to save this as a draft without triggering the factory.
