@@ -182,7 +182,7 @@ jobs:
           --command "${TASK_COMMAND}" \
           --change-request="${CHANGE_REQUEST}" \
           --change-request-auth-token-env AI_FACTORY_GITHUB_TOKEN \
-          --reporting-mode disabled \
+          --reporting-mode comment \
           > "${RUNNER_TEMP}/webhook.log" 2>&1 &
         WEBHOOK_PID=$!
         trap 'kill "${WEBHOOK_PID}" 2>/dev/null || true' EXIT
