@@ -1,6 +1,6 @@
 name: AI Factory Task
 description: Submit a coding task to be handled by the AI factory.
-labels: ["ai-factory-run"]
+labels: ["ai-factory", "ai-factory-run"]
 body:
   - type: markdown
     attributes:
@@ -47,4 +47,4 @@ body:
   - type: markdown
     attributes:
       value: |
-        The `ai-factory-run` label is applied automatically. Remove it if you want to save this as a draft without triggering the factory.
+        The `ai-factory` and `ai-factory-run` labels are applied automatically. Remove `ai-factory-run` if you want to save this as a draft without triggering the factory.
