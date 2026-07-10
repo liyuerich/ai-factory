@@ -33,11 +33,28 @@ type StatusPatchOptions struct {
 	Phase            string
 	Message          string
 	Reason           string
+	FailureReason    FailureClassification
 	SandboxClaimName string
 	SandboxName      string
 	LastResultURL    string
 	ObservedCommit   string
 	Now              time.Time
+}
+
+// failureReason returns a stable reason for failures, falling back to the caller reason.
+func failureReason(opts StatusPatchOptions) string {
+	if opts.Phase == PhaseFailed && opts.FailureReason.Reason != "" {
+		return string(opts.FailureReason.Reason)
+	}
+	return opts.Reason
+}
+
+// failureMessage includes the raw message with a friendly explanation for failures.
+func failureMessage(opts StatusPatchOptions) string {
+	if opts.Phase == PhaseFailed && opts.FailureReason.Reason != "" {
+		return FriendlyFailureMessage(opts.FailureReason)
+	}
+	return opts.Message
 }
 
 // StatusMergePatch renders a Kubernetes merge patch for the status subresource.
@@ -59,8 +76,8 @@ func StatusMergePatch(opts StatusPatchOptions) ([]byte, error) {
 			{
 				Type:               opts.Phase,
 				Status:             "True",
-				Reason:             opts.Reason,
-				Message:            opts.Message,
+				Reason:             failureReason(opts),
+				Message:            failureMessage(opts),
 				LastTransitionTime: timestamp,
 			},
 		},

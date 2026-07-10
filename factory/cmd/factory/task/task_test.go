@@ -134,7 +134,7 @@ func TestBuildReportMessage(t *testing.T) {
 			Namespace: "factory-system",
 		},
 	}
-	got := buildReportMessage(task, taskpkg.PhaseSucceeded, "done")
+	got := buildReportMessageFromString(task, taskpkg.PhaseSucceeded, "done")
 	want := "FactoryTask `factory-system/validate-ai-factory` Succeeded\n\ndone"
 	if got != want {
 		t.Fatalf("buildReportMessage() = %q, want %q", got, want)
@@ -143,7 +143,7 @@ func TestBuildReportMessage(t *testing.T) {
 
 func TestBuildReportMessageClassifiesAgentFailures(t *testing.T) {
 	task := &taskpkg.FactoryTask{Metadata: taskpkg.ObjectMeta{Name: "validate-ai-factory"}}
-	got := buildReportMessage(task, taskpkg.PhaseFailed, "OpenAI-compatible model reached max tool rounds (40)")
+	got := buildReportMessageFromString(task, taskpkg.PhaseFailed, "OpenAI-compatible model reached max tool rounds (40)")
 	if !strings.Contains(got, "Likely cause: The agent used all available shell tool rounds") {
 		t.Fatalf("buildReportMessage() = %q", got)
 	}
@@ -383,5 +383,27 @@ func TestKubectlCommandErrorIncludesOutputTailAndRedactsSecrets(t *testing.T) {
 	}
 	if strings.Contains(message, "secret-token") {
 		t.Fatalf("error message leaked secret:\n%s", message)
+	}
+}
+
+func TestReportMessagePreservesRawMessage(t *testing.T) {
+	task := &taskpkg.FactoryTask{Metadata: taskpkg.ObjectMeta{Name: "validate-ai-factory"}}
+	got := buildReportMessageFromString(task, taskpkg.PhaseFailed, "empty repair script")
+	if !strings.Contains(got, "Likely cause") {
+		t.Fatalf("missing friendly cause: %q", got)
+	}
+	if !strings.Contains(got, "empty repair script") {
+		t.Fatalf("raw message not preserved: %q", got)
+	}
+}
+
+func TestReportMessageNoClassification(t *testing.T) {
+	task := &taskpkg.FactoryTask{Metadata: taskpkg.ObjectMeta{Name: "validate-ai-factory"}}
+	got := buildReportMessageFromString(task, taskpkg.PhaseFailed, "unrecognized failure")
+	if strings.Contains(got, "Likely cause") {
+		t.Fatalf("should not classify unknown failure: %q", got)
+	}
+	if got != "FactoryTask `default/validate-ai-factory` Failed\n\nunrecognized failure" {
+		t.Fatalf("unexpected message: %q", got)
 	}
 }

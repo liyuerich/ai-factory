@@ -160,7 +160,7 @@ var reportCommentCmd = &cobra.Command{
 		}
 		message := reportCommentOptions.message
 		if strings.TrimSpace(message) == "" {
-			message = buildReportMessage(task, "Manual", "FactoryTask report requested manually")
+			message = buildReportMessageFromString(task, "Manual", "FactoryTask report requested manually")
 		}
 		opts := taskpkg.CommentReportOptions{
 			Provider:  reportingProvider(task),
@@ -697,6 +697,7 @@ func executeTask(out io.Writer, task *taskpkg.FactoryTask, taskData []byte, appl
 				Message:          fmt.Sprintf("%s: %v", step.Name, err),
 				SandboxClaimName: claim,
 				SandboxName:      sandboxName,
+				FailureReason:    taskpkg.ClassifyFailure(err.Error()),
 			})
 			reportTaskResult(out, task, taskpkg.PhaseFailed, fmt.Sprintf("%s failed: %v", step.Name, err), reportingEnabled(controllerName))
 			return fmt.Errorf("%s: %w", step.Name, err)
@@ -795,7 +796,8 @@ func reportTaskResult(out io.Writer, task *taskpkg.FactoryTask, phase, message s
 	if !enabled || task.Spec.Reporting.Mode != "comment" || task.Spec.Reporting.TargetURL == "" {
 		return
 	}
-	body := buildReportMessage(task, phase, message)
+	fc := taskpkg.ClassifyFailure(message)
+	body := buildReportMessage(task, phase, fc)
 	if err := taskpkg.PostIssueComment(context.Background(), taskpkg.CommentReportOptions{
 		Provider:  reportingProvider(task),
 		TargetURL: task.Spec.Reporting.TargetURL,
@@ -807,15 +809,20 @@ func reportTaskResult(out io.Writer, task *taskpkg.FactoryTask, phase, message s
 	fmt.Fprintf(out, "--- REPORT: comment %s\n", task.Spec.Reporting.TargetURL)
 }
 
-func buildReportMessage(task *taskpkg.FactoryTask, phase, message string) string {
+func buildReportMessage(task *taskpkg.FactoryTask, phase string, fc taskpkg.FailureClassification) string {
 	name := task.Metadata.Name
 	if ns := namespaceForTask(task); ns != "" {
 		name = ns + "/" + name
 	}
+	message := fc.RawMessage
 	if phase == taskpkg.PhaseFailed {
-		message = friendlyFailureMessage(message)
+		message = taskpkg.FriendlyFailureMessage(fc)
 	}
 	return fmt.Sprintf("FactoryTask `%s` %s\n\n%s", name, phase, message)
+}
+
+func buildReportMessageFromString(task *taskpkg.FactoryTask, phase, message string) string {
+	return buildReportMessage(task, phase, taskpkg.ClassifyFailure(message))
 }
 
 func changeRequestReportMessage(task *taskpkg.FactoryTask, resultURL string, alreadyExists bool, changedFiles []string) string {
@@ -926,29 +933,6 @@ func dnsLabelForReport(value string) string {
 		return result
 	}
 	return strings.Trim(result[:63], "-.")
-}
-
-func friendlyFailureMessage(message string) string {
-	lower := strings.ToLower(message)
-	reason := ""
-	switch {
-	case strings.Contains(lower, "finish_reason") && strings.Contains(lower, "length"):
-		reason = "Model output was truncated by the token limit."
-	case strings.Contains(lower, "max tool rounds") || strings.Contains(lower, "shell tool limit") || strings.Contains(lower, "tool calls during all final script attempts"):
-		reason = "The agent used all available shell tool rounds before producing a final script."
-	case strings.Contains(lower, "empty repair script"):
-		reason = "The model returned an empty repair script after the generated script failed."
-	case strings.Contains(lower, "api request failed") || strings.Contains(lower, "unexpected eof") || strings.Contains(lower, "timed out"):
-		reason = "The model API or network request failed."
-	case strings.Contains(lower, "go test") && (strings.Contains(lower, "fail") || strings.Contains(lower, "error")):
-		reason = "Validation failed while running Go tests."
-	case strings.Contains(lower, "syntaxerror") || strings.Contains(lower, "syntax error"):
-		reason = "The generated script had a syntax error."
-	}
-	if reason == "" {
-		return message
-	}
-	return fmt.Sprintf("Likely cause: %s\n\n%s", reason, message)
 }
 
 func reportingProvider(task *taskpkg.FactoryTask) string {
