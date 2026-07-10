@@ -379,14 +379,67 @@ func parseGitLabIssueWebhook(payload []byte) (*IssueWebhookEvent, error) {
 func issueInstructions(event *IssueWebhookEvent) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Work on %s issue #%d: %s\n\n", event.Provider, event.IssueNumber, strings.TrimSpace(event.IssueTitle))
-	if strings.TrimSpace(event.IssueBody) != "" {
-		b.WriteString(strings.TrimSpace(event.IssueBody))
+	if body := formatIssueBody(event.IssueBody); body != "" {
+		b.WriteString(body)
 		b.WriteString("\n\n")
 	}
 	if event.IssueURL != "" {
 		fmt.Fprintf(&b, "Issue URL: %s", event.IssueURL)
 	}
 	return strings.TrimSpace(b.String())
+}
+
+func formatIssueBody(body string) string {
+	body = strings.TrimSpace(body)
+	if body == "" {
+		return ""
+	}
+	sections := parseGitHubIssueFormBody(body)
+	if len(sections) == 0 {
+		return body
+	}
+	labels := []string{
+		"Goal",
+		"Files or areas to change",
+		"Acceptance criteria",
+		"Allow creating a pull request",
+	}
+	var b strings.Builder
+	for _, label := range labels {
+		value := strings.TrimSpace(sections[label])
+		if value == "" || value == "_No response_" {
+			continue
+		}
+		fmt.Fprintf(&b, "%s\n%s\n\n", label, value)
+	}
+	return strings.TrimSpace(b.String())
+}
+
+func parseGitHubIssueFormBody(body string) map[string]string {
+	sections := map[string]string{}
+	current := ""
+	var value strings.Builder
+	flush := func() {
+		if current == "" {
+			return
+		}
+		sections[current] = strings.TrimSpace(value.String())
+		value.Reset()
+	}
+	for _, line := range strings.Split(body, "\n") {
+		if strings.HasPrefix(line, "### ") {
+			flush()
+			current = strings.TrimSpace(strings.TrimPrefix(line, "### "))
+			continue
+		}
+		if current == "" {
+			continue
+		}
+		value.WriteString(line)
+		value.WriteByte('\n')
+	}
+	flush()
+	return sections
 }
 
 func triggerActions(actions []string) []string {
