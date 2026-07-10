@@ -118,16 +118,21 @@ func CreateChangeRequest(ctx context.Context, task *FactoryTask, opts ChangeRequ
 	if err != nil {
 		return nil, err
 	}
+	client := opts.HTTPClient
+	if client == nil {
+		client = &http.Client{Timeout: 30 * time.Second}
+	}
+	if result, err := findExistingChangeRequest(ctx, task, opts, req, client); err != nil {
+		return nil, err
+	} else if result != nil {
+		return result, nil
+	}
 	httpReq, err := http.NewRequestWithContext(ctx, req.Method, req.URL, bytes.NewReader(req.Body))
 	if err != nil {
 		return nil, fmt.Errorf("create change request: %w", err)
 	}
 	for key, value := range req.Headers {
 		httpReq.Header.Set(key, value)
-	}
-	client := opts.HTTPClient
-	if client == nil {
-		client = &http.Client{Timeout: 30 * time.Second}
 	}
 	resp, err := client.Do(httpReq)
 	if err != nil {
@@ -147,6 +152,69 @@ func CreateChangeRequest(ctx context.Context, task *FactoryTask, opts ChangeRequ
 		return nil, err
 	}
 	return &ChangeRequestResult{Provider: req.Provider, URL: resultURL}, nil
+}
+
+func findExistingChangeRequest(ctx context.Context, task *FactoryTask, opts ChangeRequestOptions, createReq *ChangeRequest, client *http.Client) (*ChangeRequestResult, error) {
+	changeBranch, _, _, _, _, _, _, _ := changeRequestDefaults(task)
+	var lookupURL string
+	switch task.Spec.Source.Provider {
+	case ProviderGitHub:
+		apiBase := strings.TrimRight(opts.APIBase, "/")
+		if apiBase == "" {
+			apiBase = defaultGitHubAPIBase
+		}
+		owner, repo, err := splitRepository(task.Spec.Source.Repository)
+		if err != nil {
+			return nil, err
+		}
+		values := url.Values{}
+		values.Set("state", "open")
+		values.Set("head", owner+":"+changeBranch)
+		lookupURL = fmt.Sprintf("%s/repos/%s/%s/pulls?%s", apiBase, url.PathEscape(owner), url.PathEscape(repo), values.Encode())
+	case ProviderGitLab:
+		apiBase := strings.TrimRight(opts.APIBase, "/")
+		if apiBase == "" {
+			host := task.Spec.Source.Host
+			if host == "" {
+				host = "gitlab.com"
+			}
+			apiBase = fmt.Sprintf("https://%s/api/v4", host)
+		}
+		values := url.Values{}
+		values.Set("state", "opened")
+		values.Set("source_branch", changeBranch)
+		lookupURL = fmt.Sprintf("%s/projects/%s/merge_requests?%s", apiBase, url.PathEscape(task.Spec.Source.Repository), values.Encode())
+	default:
+		return nil, nil
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, lookupURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create %s change request lookup: %w", createReq.Provider, err)
+	}
+	for key, value := range createReq.Headers {
+		if strings.EqualFold(key, "Content-Type") {
+			continue
+		}
+		httpReq.Header.Set(key, value)
+	}
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("lookup %s change request: %w", createReq.Provider, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		return nil, classifyChangeRequestError(createReq.Provider, resp.StatusCode, resp.Status, string(body))
+	}
+	resultURL, err := decodeExistingChangeRequestURL(createReq.Provider, resp)
+	if err != nil {
+		return nil, err
+	}
+	if resultURL == "" {
+		return nil, nil
+	}
+	return &ChangeRequestResult{Provider: createReq.Provider, URL: resultURL, AlreadyExists: true}, nil
 }
 
 func IsChangeRequestAlreadyExists(err error) bool {
@@ -299,6 +367,22 @@ func decodeChangeRequestURL(provider string, resp *http.Response) (string, error
 		}
 	}
 	return "", fmt.Errorf("%s change request response missing URL", provider)
+}
+
+func decodeExistingChangeRequestURL(provider string, resp *http.Response) (string, error) {
+	var payload []map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return "", fmt.Errorf("decode existing %s change request response: %w", provider, err)
+	}
+	if len(payload) == 0 {
+		return "", nil
+	}
+	for _, key := range []string{"html_url", "web_url"} {
+		if value, ok := payload[0][key].(string); ok && value != "" {
+			return value, nil
+		}
+	}
+	return "", fmt.Errorf("existing %s change request response missing URL", provider)
 }
 
 func splitRepository(repository string) (string, string, error) {

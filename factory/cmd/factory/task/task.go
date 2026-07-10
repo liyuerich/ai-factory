@@ -726,12 +726,16 @@ func executeTask(out io.Writer, task *taskpkg.FactoryTask, taskData []byte, appl
 	}
 	if changeRequestAlreadyExists {
 		resultMessage = "FactoryTask completed successfully\n\nChange request already exists."
+		if resultURL != "" {
+			resultMessage = fmt.Sprintf("FactoryTask completed successfully\n\nChange request already exists: %s", resultURL)
+		}
 		if err := patchTaskStatus(namespace, task.Metadata.Name, taskpkg.StatusPatchOptions{
 			Phase:            taskpkg.PhaseSucceeded,
 			Reason:           "ChangeRequestAlreadyExists",
 			Message:          "Change request already exists",
 			SandboxClaimName: claim,
 			SandboxName:      sandboxName,
+			LastResultURL:    resultURL,
 		}); err != nil {
 			return err
 		}
@@ -784,7 +788,7 @@ func createTaskChangeRequest(task *taskpkg.FactoryTask, enabled bool) (string, b
 		return "", false, err
 	}
 	if result.AlreadyExists {
-		return "", true, nil
+		return result.URL, true, nil
 	}
 	return result.URL, false, nil
 }

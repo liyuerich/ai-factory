@@ -99,6 +99,19 @@ func TestBuildGitLabMergeRequest(t *testing.T) {
 func TestCreateChangeRequest(t *testing.T) {
 	var gotPath string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			if r.URL.Path != "/repos/liyuerich/ai-factory/pulls" {
+				t.Fatalf("lookup path = %q", r.URL.Path)
+			}
+			if r.URL.Query().Get("head") != "liyuerich:ai-factory/fix-docs" {
+				t.Fatalf("lookup head = %q", r.URL.Query().Get("head"))
+			}
+			if r.URL.Query().Get("state") != "open" {
+				t.Fatalf("lookup state = %q", r.URL.Query().Get("state"))
+			}
+			_, _ = w.Write([]byte(`[]`))
+			return
+		}
 		gotPath = r.URL.Path
 		w.WriteHeader(http.StatusCreated)
 		_, _ = w.Write([]byte(`{"html_url":"https://github.com/liyuerich/ai-factory/pull/10"}`))
@@ -120,8 +133,44 @@ func TestCreateChangeRequest(t *testing.T) {
 	}
 }
 
+func TestCreateChangeRequestReturnsExistingGitHubPullRequest(t *testing.T) {
+	postCalled := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			postCalled = true
+			t.Fatal("unexpected create request")
+		}
+		if r.URL.Path != "/repos/liyuerich/ai-factory/pulls" {
+			t.Fatalf("lookup path = %q", r.URL.Path)
+		}
+		_, _ = w.Write([]byte(`[{"html_url":"https://github.com/liyuerich/ai-factory/pull/12"}]`))
+	}))
+	defer server.Close()
+
+	result, err := CreateChangeRequest(context.Background(), mustChangeRequestTask(t, ProviderGitHub), ChangeRequestOptions{
+		Token:   "token",
+		APIBase: server.URL,
+	})
+	if err != nil {
+		t.Fatalf("CreateChangeRequest() error = %v", err)
+	}
+	if postCalled {
+		t.Fatal("POST was called")
+	}
+	if !result.AlreadyExists {
+		t.Fatalf("AlreadyExists = false")
+	}
+	if result.URL != "https://github.com/liyuerich/ai-factory/pull/12" {
+		t.Fatalf("result URL = %q", result.URL)
+	}
+}
+
 func TestCreateChangeRequestTreatsGitHubAlreadyExistsAsSuccess(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			_, _ = w.Write([]byte(`[]`))
+			return
+		}
 		w.WriteHeader(http.StatusUnprocessableEntity)
 		_, _ = w.Write([]byte(`{"message":"Validation Failed","errors":[{"message":"A pull request already exists for liyuerich:ai-factory/fix-docs."}]}`))
 	}))
@@ -160,6 +209,10 @@ func TestCreateChangeRequestClassifiesAuthFailure(t *testing.T) {
 
 func TestCreateChangeRequestTreatsGitLabAlreadyExistsAsSuccess(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			_, _ = w.Write([]byte(`[]`))
+			return
+		}
 		w.WriteHeader(http.StatusConflict)
 		_, _ = w.Write([]byte(`{"message":["Another open merge request already exists for this source branch"]}`))
 	}))
@@ -174,6 +227,44 @@ func TestCreateChangeRequestTreatsGitLabAlreadyExistsAsSuccess(t *testing.T) {
 	}
 	if !result.AlreadyExists {
 		t.Fatalf("AlreadyExists = false")
+	}
+}
+
+func TestCreateChangeRequestReturnsExistingGitLabMergeRequest(t *testing.T) {
+	postCalled := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			postCalled = true
+			t.Fatal("unexpected create request")
+		}
+		if r.URL.EscapedPath() != "/projects/platform%2Fai%2Fai-factory/merge_requests" {
+			t.Fatalf("lookup path = %q", r.URL.EscapedPath())
+		}
+		if r.URL.Query().Get("source_branch") != "ai-factory/fix-docs" {
+			t.Fatalf("lookup source_branch = %q", r.URL.Query().Get("source_branch"))
+		}
+		if r.URL.Query().Get("state") != "opened" {
+			t.Fatalf("lookup state = %q", r.URL.Query().Get("state"))
+		}
+		_, _ = w.Write([]byte(`[{"web_url":"https://gitlab.example.com/platform/ai/ai-factory/-/merge_requests/8"}]`))
+	}))
+	defer server.Close()
+
+	result, err := CreateChangeRequest(context.Background(), mustChangeRequestTask(t, ProviderGitLab), ChangeRequestOptions{
+		Token:   "token",
+		APIBase: server.URL,
+	})
+	if err != nil {
+		t.Fatalf("CreateChangeRequest() error = %v", err)
+	}
+	if postCalled {
+		t.Fatal("POST was called")
+	}
+	if !result.AlreadyExists {
+		t.Fatalf("AlreadyExists = false")
+	}
+	if result.URL != "https://gitlab.example.com/platform/ai/ai-factory/-/merge_requests/8" {
+		t.Fatalf("result URL = %q", result.URL)
 	}
 }
 
