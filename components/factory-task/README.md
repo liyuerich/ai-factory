@@ -199,10 +199,10 @@ provider such as Kimi, DeepSeek, Qwen, Ollama, or vLLM:
 | `AI_FACTORY_OPENAI_BASE_URL` | `https://api.moonshot.cn/v1` | API base URL. |
 | `AI_FACTORY_OPENAI_MODEL` | `kimi-latest` | Model name. |
 | `AI_FACTORY_OPENAI_TEMPERATURE` | `1` | Sampling temperature. |
-| `AI_FACTORY_OPENAI_MAX_TOKENS` | `24000` | Maximum response tokens. |
-| `AI_FACTORY_OPENAI_MAX_TOOL_ROUNDS` | `20` | Maximum Shell tool call rounds. |
-| `AI_FACTORY_OPENAI_MAX_FINAL_SCRIPT_ROUNDS` | `3` | Maximum no-tool final script retries. |
-| `AI_FACTORY_OPENAI_MAX_REPAIR_ROUNDS` | `2` | Maximum repair attempts after a failed script. |
+| `AI_FACTORY_OPENAI_MAX_TOKENS` | `48000` | Maximum response tokens. |
+| `AI_FACTORY_OPENAI_MAX_TOOL_ROUNDS` | `40` | Maximum Shell tool call rounds. |
+| `AI_FACTORY_OPENAI_MAX_FINAL_SCRIPT_ROUNDS` | `5` | Maximum no-tool final script retries. |
+| `AI_FACTORY_OPENAI_MAX_REPAIR_ROUNDS` | `3` | Maximum repair attempts after a failed script. |
 
 ### Example issue body
 
@@ -274,10 +274,10 @@ shell script, and executes that script in the cloned repository. It uses:
 | `OPENAI_BASE_URL` | `https://api.openai.com/v1` | API base URL. For Kimi, use `https://api.moonshot.cn/v1`. |
 | `OPENAI_MODEL` | `gpt-4.1` | Model name for the provider. |
 | `OPENAI_TEMPERATURE` | `1` | Sampling temperature. |
-| `OPENAI_MAX_TOKENS` | `24000` | Maximum response tokens for the generated script. |
-| `OPENAI_MAX_TOOL_ROUNDS` | `20` | Maximum Shell tool call rounds before the model must return a script. |
-| `OPENAI_MAX_FINAL_SCRIPT_ROUNDS` | `3` | Maximum no-tool final script retries if the model still attempts tool calls. |
-| `OPENAI_MAX_REPAIR_ROUNDS` | `2` | Maximum generated-script repair attempts after the script exits non-zero. |
+| `OPENAI_MAX_TOKENS` | `48000` | Maximum response tokens for the generated script. |
+| `OPENAI_MAX_TOOL_ROUNDS` | `40` | Maximum Shell tool call rounds before the model must return a script. |
+| `OPENAI_MAX_FINAL_SCRIPT_ROUNDS` | `5` | Maximum no-tool final script retries if the model still attempts tool calls. |
+| `OPENAI_MAX_REPAIR_ROUNDS` | `3` | Maximum generated-script repair attempts after the script exits non-zero. |
 
 ## Sandbox git authentication
 
