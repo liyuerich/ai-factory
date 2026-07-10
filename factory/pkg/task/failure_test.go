@@ -62,6 +62,12 @@ func TestClassifyFailureRecognizesKnownReasons(t *testing.T) {
 			want:    ValidationFailed,
 			wantMsg: "syntax error",
 		},
+		{
+			name:    "CommandUnavailable",
+			message: "/tmp/ai-factory-agent.sh: line 16: go: command not found",
+			want:    CommandUnavailable,
+			wantMsg: "missing a command",
+		},
 	}
 
 	for _, tt := range tests {
@@ -91,6 +97,30 @@ func TestClassifyFailureReturnsEmptyForUnknown(t *testing.T) {
 	}
 }
 
+func TestShouldRetryFailure(t *testing.T) {
+	tests := []struct {
+		reason FailureReason
+		want   bool
+	}{
+		{reason: ModelOutputTruncated, want: true},
+		{reason: ToolRoundsExhausted, want: true},
+		{reason: EmptyRepairScript, want: true},
+		{reason: ModelTimeout, want: true},
+		{reason: ValidationFailed, want: false},
+		{reason: CommandUnavailable, want: false},
+		{reason: "", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(string(tt.reason), func(t *testing.T) {
+			got := ShouldRetryFailure(FailureClassification{Reason: tt.reason})
+			if got != tt.want {
+				t.Fatalf("ShouldRetryFailure(%q) = %v, want %v", tt.reason, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestFailureClassificationStderrTail(t *testing.T) {
 	fc := ClassifyFailure("empty repair script").WithStderrTail("patch: no valid hunks")
 	msg := FriendlyFailureMessage(fc)
@@ -110,6 +140,7 @@ func TestFailureReasonList(t *testing.T) {
 		EmptyRepairScript,
 		ModelTimeout,
 		ValidationFailed,
+		CommandUnavailable,
 	}
 	if len(reasons) != len(want) {
 		t.Fatalf("len(reasons) = %d, want %d", len(reasons), len(want))

@@ -691,13 +691,30 @@ func executeTask(out io.Writer, task *taskpkg.FactoryTask, taskData []byte, appl
 	for _, step := range output.Plan.Steps {
 		fmt.Fprintf(out, "--- RUN: %s\n", step.Name)
 		if err := runKubectl(nil, append([]string{"exec", "-n", namespace, sandboxName, "-c", output.Plan.ContainerName, "--"}, step.Command...)...); err != nil {
+			failure := taskpkg.ClassifyFailure(err.Error())
+			if taskpkg.ShouldRetryFailure(failure) {
+				fmt.Fprintf(out, "--- RETRY: %s after %s\n", step.Name, failure.Reason)
+				_ = patchTaskStatus(namespace, task.Metadata.Name, taskpkg.StatusPatchOptions{
+					Phase:            taskpkg.PhaseRunning,
+					Reason:           "StepRetrying",
+					Message:          fmt.Sprintf("%s failed with %s; retrying once", step.Name, failure.Reason),
+					SandboxClaimName: claim,
+					SandboxName:      sandboxName,
+				})
+				if retryErr := runKubectl(nil, append([]string{"exec", "-n", namespace, sandboxName, "-c", output.Plan.ContainerName, "--"}, step.Command...)...); retryErr == nil {
+					continue
+				} else {
+					err = fmt.Errorf("%w\nretry failed: %v", err, retryErr)
+					failure = taskpkg.ClassifyFailure(err.Error())
+				}
+			}
 			_ = patchTaskStatus(namespace, task.Metadata.Name, taskpkg.StatusPatchOptions{
 				Phase:            taskpkg.PhaseFailed,
 				Reason:           "StepFailed",
 				Message:          fmt.Sprintf("%s: %v", step.Name, err),
 				SandboxClaimName: claim,
 				SandboxName:      sandboxName,
-				FailureReason:    taskpkg.ClassifyFailure(err.Error()),
+				FailureReason:    failure,
 			})
 			reportTaskResult(out, task, taskpkg.PhaseFailed, fmt.Sprintf("%s failed: %v", step.Name, err), reportingEnabled(controllerName))
 			return fmt.Errorf("%s: %w", step.Name, err)

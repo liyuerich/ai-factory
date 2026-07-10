@@ -35,6 +35,8 @@ const (
 	ModelTimeout FailureReason = "ModelTimeout"
 	// ValidationFailed means validation commands (e.g. go test) failed.
 	ValidationFailed FailureReason = "ValidationFailed"
+	// CommandUnavailable means an expected tool was not available in the sandbox.
+	CommandUnavailable FailureReason = "CommandUnavailable"
 )
 
 // FailureClassification groups the stable reason and a user-friendly message
@@ -75,9 +77,23 @@ func ClassifyFailure(message string) FailureClassification {
 	case strings.Contains(lower, "syntaxerror") || strings.Contains(lower, "syntax error"):
 		fc.Reason = ValidationFailed
 		fc.Friendly = "The generated script had a syntax error."
+	case strings.Contains(lower, "command not found") || strings.Contains(lower, "executable file not found"):
+		fc.Reason = CommandUnavailable
+		fc.Friendly = "The sandbox is missing a command required by the generated script."
 	}
 
 	return fc
+}
+
+// ShouldRetryFailure returns true for failures that are often transient or can
+// be recovered by asking the agent to regenerate a smaller/fixed script.
+func ShouldRetryFailure(fc FailureClassification) bool {
+	switch fc.Reason {
+	case ModelOutputTruncated, ToolRoundsExhausted, EmptyRepairScript, ModelTimeout:
+		return true
+	default:
+		return false
+	}
 }
 
 // WithStderrTail returns a copy of fc with the given stderr tail attached.
@@ -107,5 +123,6 @@ func FailureReasonList() []FailureReason {
 		EmptyRepairScript,
 		ModelTimeout,
 		ValidationFailed,
+		CommandUnavailable,
 	}
 }
