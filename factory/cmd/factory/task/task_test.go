@@ -153,21 +153,59 @@ func TestChangeRequestReportMessageIncludesReviewContext(t *testing.T) {
 	task := &taskpkg.FactoryTask{
 		Metadata: taskpkg.ObjectMeta{Name: "github-liyuerich-ai-factory-29"},
 		Spec: taskpkg.FactoryTaskSpec{
-			Source: taskpkg.SourceSpec{BaseRef: "main"},
-			Work:   taskpkg.WorkSpec{Commands: []string{"go test ./..."}},
+			Source: taskpkg.SourceSpec{
+				Provider: taskpkg.ProviderGitHub,
+				BaseRef:  "main",
+			},
+			Work: taskpkg.WorkSpec{Commands: []string{"go test ./..."}},
 			ChangeRequest: taskpkg.ChangeRequestSpec{
 				Enabled:      true,
 				BranchPrefix: "factory-task",
 			},
 		},
 	}
-	got := changeRequestReportMessage(task, "https://github.com/liyuerich/ai-factory/pull/30", true)
+	got := changeRequestReportMessage(task, "https://github.com/liyuerich/ai-factory/pull/30", true, nil)
 	for _, want := range []string{
-		"Change request already exists: https://github.com/liyuerich/ai-factory/pull/30",
+		"An existing change request is already open",
+		"**GitHub pull request:** https://github.com/liyuerich/ai-factory/pull/30",
 		"`go test ./...` passed",
 		"Source: `factory-task/github-liyuerich-ai-factory-29`",
 		"Target: `main`",
-		"Files changed tab",
+		"### Changed files",
+		"### Next steps",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("changeRequestReportMessage() missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestChangeRequestReportMessageListsChangedFiles(t *testing.T) {
+	task := &taskpkg.FactoryTask{
+		Metadata: taskpkg.ObjectMeta{Name: "fix-docs"},
+		Spec: taskpkg.FactoryTaskSpec{
+			Source: taskpkg.SourceSpec{
+				Provider: taskpkg.ProviderGitLab,
+				BaseRef:  "main",
+			},
+			Work: taskpkg.WorkSpec{Commands: []string{"go test ./..."}},
+			ChangeRequest: taskpkg.ChangeRequestSpec{
+				Enabled:      true,
+				BranchPrefix: "factory-task",
+			},
+		},
+	}
+	got := changeRequestReportMessage(task, "https://gitlab.example.com/platform/ai/ai-factory/-/merge_requests/8", false, []string{
+		"factory/pkg/task/task.go",
+		"factory/cmd/factory/task/task.go",
+	})
+	for _, want := range []string{
+		"A change request was created for this FactoryTask.",
+		"**GitLab merge request:** https://gitlab.example.com/platform/ai/ai-factory/-/merge_requests/8",
+		"- `factory/pkg/task/task.go`",
+		"- `factory/cmd/factory/task/task.go`",
+		"`go test ./...` passed",
+		"Review the change request",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("changeRequestReportMessage() missing %q:\n%s", want, got)

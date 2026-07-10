@@ -712,6 +712,7 @@ func executeTask(out io.Writer, task *taskpkg.FactoryTask, taskData []byte, appl
 		return err
 	}
 	resultMessage := "FactoryTask completed successfully"
+	changedFiles := collectChangedFiles(namespace, sandboxName, output.Plan.ContainerName)
 	resultURL, changeRequestAlreadyExists, err := createTaskChangeRequest(task, changeRequestEnabled(controllerName))
 	if err != nil {
 		_ = patchTaskStatus(namespace, task.Metadata.Name, taskpkg.StatusPatchOptions{
@@ -725,7 +726,7 @@ func executeTask(out io.Writer, task *taskpkg.FactoryTask, taskData []byte, appl
 		return err
 	}
 	if changeRequestAlreadyExists {
-		resultMessage = changeRequestReportMessage(task, resultURL, true)
+		resultMessage = changeRequestReportMessage(task, resultURL, true, changedFiles)
 		if err := patchTaskStatus(namespace, task.Metadata.Name, taskpkg.StatusPatchOptions{
 			Phase:            taskpkg.PhaseSucceeded,
 			Reason:           "ChangeRequestAlreadyExists",
@@ -737,7 +738,7 @@ func executeTask(out io.Writer, task *taskpkg.FactoryTask, taskData []byte, appl
 			return err
 		}
 	} else if resultURL != "" {
-		resultMessage = changeRequestReportMessage(task, resultURL, false)
+		resultMessage = changeRequestReportMessage(task, resultURL, false, changedFiles)
 		if err := patchTaskStatus(namespace, task.Metadata.Name, taskpkg.StatusPatchOptions{
 			Phase:            taskpkg.PhaseSucceeded,
 			Reason:           "ChangeRequestCreated",
@@ -817,30 +818,73 @@ func buildReportMessage(task *taskpkg.FactoryTask, phase, message string) string
 	return fmt.Sprintf("FactoryTask `%s` %s\n\n%s", name, phase, message)
 }
 
-func changeRequestReportMessage(task *taskpkg.FactoryTask, resultURL string, alreadyExists bool) string {
-	status := "Change request created"
+func changeRequestReportMessage(task *taskpkg.FactoryTask, resultURL string, alreadyExists bool, changedFiles []string) string {
+	status := "A change request was created for this FactoryTask."
+	nextStepAction := "Review the change request and approve or merge it when ready."
 	if alreadyExists {
-		status = "Change request already exists"
+		status = "An existing change request is already open for this FactoryTask."
+		nextStepAction = "Review the existing change request and decide whether to merge or close it."
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "FactoryTask completed successfully\n\n%s", status)
 	if resultURL != "" {
-		fmt.Fprintf(&b, ": %s", resultURL)
+		fmt.Fprintf(&b, "\n\n**%s:** %s", changeRequestKind(task), resultURL)
 	}
-	b.WriteString("\n\nValidation")
+
+	b.WriteString("\n\n### Changed files")
+	if len(changedFiles) == 0 {
+		b.WriteString("\nSee the change request above for the full file list.")
+	} else {
+		for _, file := range changedFiles {
+			fmt.Fprintf(&b, "\n- `%s`", file)
+		}
+	}
+
+	b.WriteString("\n\n### Validation")
 	if len(task.Spec.Work.Commands) == 0 {
 		b.WriteString("\n- No validation command configured.")
 	} else {
 		for _, command := range task.Spec.Work.Commands {
-			fmt.Fprintf(&b, "\n- `%s` passed before creating the change request.", command)
+			fmt.Fprintf(&b, "\n- `%s` passed before the change request was reported.", command)
 		}
 	}
 	if task.Spec.ChangeRequest.Enabled {
 		changeBranch, targetBranch := changeRequestBranches(task)
-		fmt.Fprintf(&b, "\n\nBranch\n- Source: `%s`\n- Target: `%s`", changeBranch, targetBranch)
+		fmt.Fprintf(&b, "\n\n### Branch\n- Source: `%s`\n- Target: `%s`", changeBranch, targetBranch)
 	}
-	b.WriteString("\n\nReview\n- Open the change request and inspect the Files changed tab for the exact file list.")
+	fmt.Fprintf(&b, "\n\n### Next steps\n- %s\n- Verify the changed files and validation results above match your expectations.", nextStepAction)
+	if alreadyExists {
+		b.WriteString("\n- If the issue was re-triggered, the existing branch may have been updated with new commits.")
+	}
 	return b.String()
+}
+
+func changeRequestKind(task *taskpkg.FactoryTask) string {
+	switch task.Spec.Source.Provider {
+	case taskpkg.ProviderGitHub:
+		return "GitHub pull request"
+	case taskpkg.ProviderGitLab:
+		return "GitLab merge request"
+	default:
+		return "Change request"
+	}
+}
+
+func collectChangedFiles(namespace, sandboxName, containerName string) []string {
+	script := "cd /workspace/repo && { git diff --name-only HEAD; git diff --name-only HEAD~1 HEAD 2>/dev/null || true; } | sort -u"
+	output, err := kubectlOutput("exec", "-n", namespace, sandboxName, "-c", containerName, "--", "/bin/sh", "-lc", script)
+	if err != nil {
+		return nil
+	}
+	var files []string
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, ".ai-factory/") {
+			continue
+		}
+		files = append(files, line)
+	}
+	return files
 }
 
 func changeRequestBranches(task *taskpkg.FactoryTask) (string, string) {
