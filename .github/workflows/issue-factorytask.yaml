@@ -31,7 +31,7 @@ concurrency:
 
 jobs:
   issue-factorytask:
-    if: contains(github.event.issue.labels.*.name, 'ai-factory') && (contains(github.event.issue.labels.*.name, 'ai-factory-run') || contains(github.event.issue.labels.*.name, 'ai-factory-smoke'))
+    if: contains(github.event.issue.labels.*.name, 'ai-factory') && (contains(github.event.issue.labels.*.name, 'ai-factory-run') || contains(github.event.issue.labels.*.name, 'ai-factory-smoke')) && (github.event.action != 'labeled' || github.event.label.name == 'ai-factory-run' || github.event.label.name == 'ai-factory-smoke')
     runs-on: ubuntu-latest
     timeout-minutes: 45
 
@@ -139,6 +139,9 @@ jobs:
       run: |
         TASK_REPOSITORY="$(printf '%s' "${FACTORY_REPOSITORY}" | tr '[:upper:]/_' '[:lower:]--')"
         TASK_NAME="github-${TASK_REPOSITORY}-${ISSUE_NUMBER}"
+        ensure_issue_label() {
+          gh label create "$1" --color "$2" --description "$3" --force >/dev/null 2>&1 || true
+        }
         CHANGE_REQUEST=false
         AGENT_COMMAND="cat >/tmp/ai-factory-agent-prompt.txt"
         AGENT_ENV_ARGS=()
@@ -204,6 +207,14 @@ jobs:
 
         kubectl get factorytask "${TASK_NAME}" -n default -o yaml
 
+        ensure_issue_label ai-factory-running 1D76DB "ai-factory is processing this issue"
+        ensure_issue_label ai-factory-done 0E8A16 "ai-factory completed this issue"
+        ensure_issue_label ai-factory-failed B60205 "ai-factory failed this issue"
+        gh issue edit "${ISSUE_NUMBER}" \
+          --add-label ai-factory-running \
+          --remove-label ai-factory-done \
+          --remove-label ai-factory-failed || true
+
         RUN_URL="${GITHUB_SERVER_URL}/${FACTORY_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
         COMMENT_BODY=$(printf 'ai-factory started processing this issue.\n\n- FactoryTask: %s\n- GitHub Actions run: %s' "${TASK_NAME}" "${RUN_URL}")
         gh issue comment "${ISSUE_NUMBER}" --body "${COMMENT_BODY}"
@@ -238,6 +249,11 @@ jobs:
             exit 1
           fi
         fi
+        gh issue edit "${ISSUE_NUMBER}" \
+          --add-label ai-factory-done \
+          --remove-label ai-factory-running \
+          --remove-label ai-factory-failed \
+          --remove-label ai-factory-run || true
 
     - name: Show FactoryTask status
       if: always()
@@ -282,6 +298,12 @@ jobs:
         if [[ -z "${MESSAGE}" ]]; then
           MESSAGE="Workflow failed before FactoryTask reported a detailed message. Check the Actions run logs."
         fi
+
+        gh label create ai-factory-failed --color B60205 --description "ai-factory failed this issue" --force >/dev/null 2>&1 || true
+        gh issue edit "${ISSUE_NUMBER}" \
+          --add-label ai-factory-failed \
+          --remove-label ai-factory-running \
+          --remove-label ai-factory-done || true
 
         COMMENT_BODY=$(printf 'FactoryTask `%s/%s` failed.\n\n- GitHub Actions run: %s\n- Phase: %s\n- Reason: %s\n- Message: %s' "default" "${TASK_NAME}" "${RUN_URL}" "${PHASE}" "${REASON}" "${MESSAGE}")
         gh issue comment "${ISSUE_NUMBER}" --body "${COMMENT_BODY}"

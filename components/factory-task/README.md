@@ -189,6 +189,14 @@ Create the following repository secrets before using the auto-trigger workflow:
 The webhook runtime also accepts `GITHUB_TOKEN` for issue comments and PR
 creation.
 
+The GitHub issue workflow updates status labels while it runs:
+
+| Label | Meaning |
+| --- | --- |
+| `ai-factory-running` | The workflow created a FactoryTask and is processing the issue. |
+| `ai-factory-done` | The FactoryTask succeeded. The workflow removes `ai-factory-run` after success. |
+| `ai-factory-failed` | The workflow or FactoryTask failed. Check the issue comment for the run URL and failure reason. |
+
 ### Repository variables for OpenAI-compatible providers
 
 Set these repository variables to point the agent at an OpenAI-compatible
