@@ -17,6 +17,7 @@ package task
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	taskpkg "github.com/ai-on-gke/ai-factory/factory/pkg/task"
 	"github.com/spf13/cobra"
 	"net/http"
@@ -284,5 +285,31 @@ spec:
 	}
 	if buf.Len() != 0 {
 		t.Fatalf("expected no output for invalid YAML, got:\n%s", buf.String())
+	}
+}
+
+func TestKubectlCommandErrorIncludesOutputTailAndRedactsSecrets(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "secret-token")
+	err := kubectlCommandError{
+		args:   []string{"exec", "sandbox", "--", "agent"},
+		err:    fmt.Errorf("exit status 1"),
+		stdout: strings.Repeat("x", 4100) + "stdout clue",
+		stderr: "failed with secret-token and finish_reason=length",
+	}
+	message := err.Error()
+	for _, want := range []string{
+		"kubectl exec sandbox -- agent: exit status 1",
+		"stdout tail:",
+		"stdout clue",
+		"stderr tail:",
+		"finish_reason=length",
+		"<redacted:OPENAI_API_KEY>",
+	} {
+		if !strings.Contains(message, want) {
+			t.Fatalf("error message missing %q:\n%s", want, message)
+		}
+	}
+	if strings.Contains(message, "secret-token") {
+		t.Fatalf("error message leaked secret:\n%s", message)
 	}
 }

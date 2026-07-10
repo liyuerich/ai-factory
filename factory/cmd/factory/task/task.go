@@ -863,9 +863,18 @@ func runKubectl(stdin []byte, args ...string) error {
 	if stdin != nil {
 		cmd.Stdin = bytes.NewReader(stdin)
 	}
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = io.MultiWriter(os.Stdout, &stdout)
+	cmd.Stderr = io.MultiWriter(os.Stderr, &stderr)
+	if err := cmd.Run(); err != nil {
+		return kubectlCommandError{
+			args:   args,
+			err:    err,
+			stdout: stdout.String(),
+			stderr: stderr.String(),
+		}
+	}
+	return nil
 }
 
 func runKubectlWithInput(stdin []byte, args ...string) error {
@@ -881,4 +890,57 @@ func kubectlOutput(args ...string) (string, error) {
 		return "", fmt.Errorf("kubectl %s: %s: %w", strings.Join(args, " "), stderr.String(), err)
 	}
 	return string(out), nil
+}
+
+type kubectlCommandError struct {
+	args   []string
+	err    error
+	stdout string
+	stderr string
+}
+
+func (e kubectlCommandError) Error() string {
+	parts := []string{fmt.Sprintf("kubectl %s: %v", strings.Join(e.args, " "), e.err)}
+	if out := summarizeCommandOutput("stdout", e.stdout); out != "" {
+		parts = append(parts, out)
+	}
+	if out := summarizeCommandOutput("stderr", e.stderr); out != "" {
+		parts = append(parts, out)
+	}
+	return strings.Join(parts, "\n")
+}
+
+func (e kubectlCommandError) Unwrap() error {
+	return e.err
+}
+
+func summarizeCommandOutput(label, output string) string {
+	output = strings.TrimSpace(redactSensitive(output))
+	if output == "" {
+		return ""
+	}
+	return fmt.Sprintf("%s tail:\n%s", label, tailString(output, 4000))
+}
+
+func tailString(value string, limit int) string {
+	if len(value) <= limit {
+		return value
+	}
+	return "... <truncated>\n" + value[len(value)-limit:]
+}
+
+func redactSensitive(value string) string {
+	redacted := value
+	for _, name := range []string{
+		"OPENAI_API_KEY",
+		"CODEX_API_KEY",
+		"GITHUB_TOKEN",
+		"GITLAB_TOKEN",
+		"AI_FACTORY_GITHUB_TOKEN",
+	} {
+		if secret := os.Getenv(name); secret != "" {
+			redacted = strings.ReplaceAll(redacted, secret, "<redacted:"+name+">")
+		}
+	}
+	return redacted
 }
