@@ -315,3 +315,139 @@ The runtime service account can:
 Keep provider tokens scoped tightly. GitHub needs issue comment and pull request
 permissions for the target repository. GitLab needs issue note and merge request
 permissions for the target project.
+
+## Troubleshooting ai-factory-run failures
+
+This section describes common failures that can occur when an issue with the
+`ai-factory-run` label is processed, and how to recover from them. The workflow
+is: a GitHub issue event creates a `FactoryTask`, the watch controller runs an
+agent inside a sandbox, and the controller opens a pull request when the agent
+finishes successfully. Failures can happen in the webhook/GitHub Actions step,
+during sandbox provisioning, inside the agent, or in the validation command.
+
+### Missing API key
+
+- **Symptom:** The issue receives an `ai-factory-failed` label and a comment
+  saying the run failed. The run logs show an authentication error from the
+  OpenAI-compatible API (for example, `401 Unauthorized` or a missing API key
+  message). No pull request is created.
+- **Cause:** The `AI_FACTORY_OPENAI_API_KEY` or `OPENAI_API_KEY` repository
+  secret is missing, misspelled, or not readable by the workflow. The agent
+  cannot call the language model without it.
+- **Recovery:** Add an `AI_FACTORY_OPENAI_API_KEY` or `OPENAI_API_KEY`
+  repository secret with a valid provider key. For the webhook runtime, re-run
+  the installer with `OPENAI_API_KEY` set so it is written to
+  `factory-task-secrets`. Re-add the `ai-factory-run` label to re-trigger the
+  issue.
+
+### source_branch_missing
+
+- **Symptom:** The `FactoryTask` fails and the issue is labeled
+  `ai-factory-failed`. The task status or log mentions
+  `source_branch_missing`. The change branch and pull request are not created.
+- **Cause:** The controller could not find the expected source branch in the
+  cloned repository. This usually happens when the default branch name has
+  changed, the repository is empty, the clone was shallow or incomplete, or
+  the issue references a branch that does not exist.
+- **Recovery:** Confirm the default branch exists on the remote and is not
+  empty. If you changed the default branch name, update the workflow or task
+  template to use the correct branch. Remove the `ai-factory-run` label and
+  add it again, or re-open the issue with the label, so the webhook or
+  workflow creates a fresh `FactoryTask` with a clean clone.
+
+### command not found
+
+- **Symptom:** The agent log or validation step reports `command not found`,
+  `exec: \"...\": executable file not found in $PATH`, or a similar shell
+  error. The task fails with `ai-factory-failed`.
+- **Cause:** The sandbox template does not include the tool required by the
+  command, the `AGENT_COMMAND` or `TASK_COMMAND` points to a binary that is
+  not installed in the image, or the executable name is misspelled.
+- **Recovery:** Check that the command is available in the sandbox template
+  (the default is `go-dev`). For custom stacks, use a sandbox template that
+  includes the required tools, or install them in the image before the agent
+  runs. Verify the spelling of `AGENT_COMMAND`, `AI_FACTORY_RUN_AGENT_COMMAND`,
+  and `TASK_COMMAND`. Re-trigger the issue after fixing the command or template.
+
+### Validation failed
+
+- **Symptom:** The agent finishes its work but the task fails with
+  `ai-factory-failed`. The log shows the validation command (for example
+  `go test ./...`) exited with a non-zero status. No pull request is created.
+- **Cause:** The agent's changes did not satisfy the acceptance criteria or
+  the repository is already in a failing state. The validation command runs in
+  the sandbox after the agent completes, so any test or lint failure blocks the
+  change-request path.
+- **Recovery:** Read the validation output in the issue comment or run logs,
+  fix the underlying test or lint failure, and re-add the `ai-factory-run`
+  label. If the issue body is ambiguous, clarify the acceptance criteria so the
+  agent can produce a passing change. For persistent failures, run the same
+  validation command locally in a clean clone before re-triggering the issue.
+
+## Troubleshooting ai-factory-run failures
+
+This section describes common failures that can occur when an issue with the
+`ai-factory-run` label is processed, and how to recover from them. The workflow
+is: a GitHub issue event creates a `FactoryTask`, the watch controller runs an
+agent inside a sandbox, and the controller opens a pull request when the agent
+finishes successfully. Failures can happen in the webhook/GitHub Actions step,
+during sandbox provisioning, inside the agent, or in the validation command.
+
+### Missing API key
+
+- **Symptom:** The issue receives an `ai-factory-failed` label and a comment
+  saying the run failed. The run logs show an authentication error from the
+  OpenAI-compatible API (for example, `401 Unauthorized` or a missing API key
+  message). No pull request is created.
+- **Cause:** The `AI_FACTORY_OPENAI_API_KEY` or `OPENAI_API_KEY` repository
+  secret is missing, misspelled, or not readable by the workflow. The agent
+  cannot call the language model without it.
+- **Recovery:** Add an `AI_FACTORY_OPENAI_API_KEY` or `OPENAI_API_KEY`
+  repository secret with a valid provider key. For the webhook runtime, re-run
+  the installer with `OPENAI_API_KEY` set so it is written to
+  `factory-task-secrets`. Re-add the `ai-factory-run` label to re-trigger the
+  issue.
+
+### source_branch_missing
+
+- **Symptom:** The `FactoryTask` fails and the issue is labeled
+  `ai-factory-failed`. The task status or log mentions
+  `source_branch_missing`. The change branch and pull request are not created.
+- **Cause:** The controller could not find the expected source branch in the
+  cloned repository. This usually happens when the default branch name has
+  changed, the repository is empty, the clone was shallow or incomplete, or
+  the issue references a branch that does not exist.
+- **Recovery:** Confirm the default branch exists on the remote and is not
+  empty. If you changed the default branch name, update the workflow or task
+  template to use the correct branch. Remove the `ai-factory-run` label and
+  add it again, or re-open the issue with the label, so the webhook or
+  workflow creates a fresh `FactoryTask` with a clean clone.
+
+### command not found
+
+- **Symptom:** The agent log or validation step reports `command not found`,
+  `exec: \"...\": executable file not found in $PATH`, or a similar shell
+  error. The task fails with `ai-factory-failed`.
+- **Cause:** The sandbox template does not include the tool required by the
+  command, the `AGENT_COMMAND` or `TASK_COMMAND` points to a binary that is
+  not installed in the image, or the executable name is misspelled.
+- **Recovery:** Check that the command is available in the sandbox template
+  (the default is `go-dev`). For custom stacks, use a sandbox template that
+  includes the required tools, or install them in the image before the agent
+  runs. Verify the spelling of `AGENT_COMMAND`, `AI_FACTORY_RUN_AGENT_COMMAND`,
+  and `TASK_COMMAND`. Re-trigger the issue after fixing the command or template.
+
+### Validation failed
+
+- **Symptom:** The agent finishes its work but the task fails with
+  `ai-factory-failed`. The log shows the validation command (for example
+  `go test ./...`) exited with a non-zero status. No pull request is created.
+- **Cause:** The agent's changes did not satisfy the acceptance criteria or
+  the repository is already in a failing state. The validation command runs in
+  the sandbox after the agent completes, so any test or lint failure blocks the
+  change-request path.
+- **Recovery:** Read the validation output in the issue comment or run logs,
+  fix the underlying test or lint failure, and re-add the `ai-factory-run`
+  label. If the issue body is ambiguous, clarify the acceptance criteria so the
+  agent can produce a passing change. For persistent failures, run the same
+  validation command locally in a clean clone before re-triggering the issue.
