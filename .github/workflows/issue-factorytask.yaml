@@ -147,11 +147,11 @@ jobs:
         AGENT_ENV_ARGS=()
         TASK_COMMAND="${FACTORY_SMOKE_COMMAND}"
         RESULT_EXPECTATION="FactoryTask to succeed"
-        if jq -e '.issue.labels[]?.name == "ai-factory-smoke"' "${GITHUB_EVENT_PATH}" >/dev/null; then
+        if jq -e '((.label.name? // "") == "ai-factory-smoke") or (.issue.labels[]?.name == "ai-factory-smoke")' "${GITHUB_EVENT_PATH}" >/dev/null; then
           CHANGE_REQUEST=true
           TASK_COMMAND="mkdir -p .ai-factory/smoke && printf 'issue=%s\nrun=%s\n' '${ISSUE_NUMBER}' '${GITHUB_RUN_ID}' > .ai-factory/smoke/issue-${ISSUE_NUMBER}.txt && ${FACTORY_SMOKE_COMMAND}"
           RESULT_EXPECTATION="an ai-factory-smoke change request URL or an existing PR status"
-        elif jq -e '.issue.labels[]?.name == "ai-factory-run"' "${GITHUB_EVENT_PATH}" >/dev/null; then
+        elif jq -e '((.label.name? // "") == "ai-factory-run") or (.issue.labels[]?.name == "ai-factory-run")' "${GITHUB_EVENT_PATH}" >/dev/null; then
           CHANGE_REQUEST=true
           if [[ "${AI_FACTORY_RUN_AGENT_COMMAND}" == *"openai-compatible"* && -z "${OPENAI_API_KEY}" ]]; then
             echo "AI_FACTORY_OPENAI_API_KEY or OPENAI_API_KEY repository secret is required for openai-compatible ai-factory-run."
