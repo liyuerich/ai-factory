@@ -243,7 +243,7 @@ jobs:
         if [[ "${CHANGE_REQUEST}" == "true" ]]; then
           LAST_RESULT_URL="$(kubectl get factorytask "${TASK_NAME}" -n default -o jsonpath='{.status.lastResultURL}')"
           LAST_MESSAGE="$(kubectl get factorytask "${TASK_NAME}" -n default -o jsonpath='{.status.lastMessage}')"
-          if [[ -z "${LAST_RESULT_URL}" && "${LAST_MESSAGE}" != "Change request already exists" ]]; then
+          if [[ -z "${LAST_RESULT_URL}" && "${LAST_MESSAGE}" != *"Change request already exists"* ]]; then
             kubectl get factorytask "${TASK_NAME}" -n default -o yaml
             echo "Expected ${RESULT_EXPECTATION}."
             exit 1
