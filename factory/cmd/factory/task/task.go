@@ -801,6 +801,9 @@ func createTaskChangeRequest(task *taskpkg.FactoryTask, enabled bool) (string, b
 	}
 	result, err := taskpkg.CreateChangeRequest(context.Background(), task, taskpkg.ChangeRequestOptions{})
 	if err != nil {
+		if taskpkg.IsChangeRequestMissingBranch(err) {
+			return "", false, nil
+		}
 		return "", false, err
 	}
 	if result.AlreadyExists {

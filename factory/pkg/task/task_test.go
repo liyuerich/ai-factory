@@ -363,6 +363,9 @@ spec:
 	if !strings.Contains(command, "codex exec --full-auto") {
 		t.Fatalf("agent command = %#v", plan.Steps[2].Command)
 	}
+	if !strings.Contains(command, "Work in a plan-first, small-step style") {
+		t.Fatalf("agent command should include small-step guidance: %#v", plan.Steps[2].Command)
+	}
 }
 
 func TestParseRejectsConflictingChangeRequestBranchFields(t *testing.T) {

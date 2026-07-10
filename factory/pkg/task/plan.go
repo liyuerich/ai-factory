@@ -227,6 +227,16 @@ if [ -n %s ]; then
   printf '\n\n' >> "$PROMPT_INPUT"
 fi
 cat >> "$PROMPT_INPUT" <<'EOF'
+## ai-factory execution guidance
+
+Work in a plan-first, small-step style:
+- Restate a concise implementation plan before changing files.
+- Prefer focused edits to one or two related files at a time.
+- Avoid broad repository scans unless the task truly requires them.
+- Keep generated shell scripts short and deterministic.
+- Run focused validation first, then the configured final validation command.
+- If the task is too large, implement the smallest useful slice and explain the remaining follow-up in comments or commit text.
+
 ## FactoryTask instructions
 
 EOF
