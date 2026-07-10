@@ -394,11 +394,15 @@ func formatIssueBody(body string) string {
 	if body == "" {
 		return ""
 	}
+	body = normalizeLiteralNewlines(body)
 	sections := parseGitHubIssueFormBody(body)
 	if len(sections) == 0 {
 		return body
 	}
 	labels := []string{
+		"Task",
+		"Requirements",
+		"Acceptance Criteria",
 		"Goal",
 		"Files or areas to change",
 		"Acceptance criteria",
@@ -413,6 +417,16 @@ func formatIssueBody(body string) string {
 		fmt.Fprintf(&b, "%s\n%s\n\n", label, value)
 	}
 	return strings.TrimSpace(b.String())
+}
+
+func normalizeLiteralNewlines(body string) string {
+	if strings.Count(body, `\n`) == 0 {
+		return body
+	}
+	if strings.Count(body, "\n") > strings.Count(body, `\n`) {
+		return body
+	}
+	return strings.ReplaceAll(body, `\n`, "\n")
 }
 
 func parseGitHubIssueFormBody(body string) map[string]string {

@@ -108,8 +108,8 @@ func TestFactoryTaskFromGitHubIssueFormFormatsInstructions(t *testing.T) {
 	}
 	instructions := task.Spec.Work.Instructions
 	for _, want := range []string{
-		"Goal\nAdd a complete issue trigger example.",
-		"Acceptance criteria\n- [ ] Documents labels",
+		"Task\nAdd a complete issue trigger example.",
+		"Acceptance Criteria\n- [ ] Documents labels",
 		"Allow creating a pull request\nYes",
 	} {
 		if !strings.Contains(instructions, want) {
@@ -121,6 +121,31 @@ func TestFactoryTaskFromGitHubIssueFormFormatsInstructions(t *testing.T) {
 	}
 	if strings.Contains(instructions, "_No response_") {
 		t.Fatalf("instructions still contain no-response placeholder:\n%s", instructions)
+	}
+}
+
+func TestFactoryTaskFromGitHubIssueEscapedNewlines(t *testing.T) {
+	task, err := FactoryTaskFromIssueWebhook([]byte(githubIssueEscapedNewlinePayload), IssueWebhookOptions{
+		Provider:           ProviderGitHub,
+		AgentName:          "builder",
+		SandboxTemplateRef: "go-dev",
+		RequiredLabels:     []string{"ai-factory"},
+	})
+	if err != nil {
+		t.Fatalf("FactoryTaskFromIssueWebhook() error = %v", err)
+	}
+	instructions := task.Spec.Work.Instructions
+	if strings.Contains(instructions, `\n`) {
+		t.Fatalf("instructions still contain escaped newlines:\n%s", instructions)
+	}
+	for _, want := range []string{
+		"Goal\nMake ai-factory safe to trigger repeatedly.",
+		"Scope\n- Detect an existing source branch.",
+		"Acceptance criteria\n- Re-triggering the same issue does not create duplicate PRs.",
+	} {
+		if !strings.Contains(instructions, want) {
+			t.Fatalf("instructions missing %q:\n%s", want, instructions)
+		}
 	}
 }
 
@@ -279,8 +304,27 @@ const githubIssueFormPayload = `{
   "issue": {
     "number": 43,
     "title": "Add issue trigger docs",
-    "body": "### Goal\n\nAdd a complete issue trigger example.\n\n### Files or areas to change\n\n_No response_\n\n### Acceptance criteria\n\n- [ ] Documents labels\n- [ ] Documents secrets\n\n### Allow creating a pull request\n\nYes\n",
+    "body": "### Task\n\nAdd a complete issue trigger example.\n\n### Requirements\n\n_No response_\n\n### Acceptance Criteria\n\n- [ ] Documents labels\n- [ ] Documents secrets\n\n### Allow creating a pull request\n\nYes\n",
     "html_url": "https://github.com/liyuerich/ai-factory/issues/43",
+    "user": {"login": "yueli"},
+    "labels": [{"name": "ai-factory"}]
+  },
+  "repository": {
+    "full_name": "liyuerich/ai-factory",
+    "html_url": "https://github.com/liyuerich/ai-factory",
+    "clone_url": "https://github.com/liyuerich/ai-factory.git",
+    "default_branch": "main"
+  },
+  "sender": {"login": "liyuerich"}
+}`
+
+const githubIssueEscapedNewlinePayload = `{
+  "action": "opened",
+  "issue": {
+    "number": 44,
+    "title": "Make change requests idempotent",
+    "body": "Goal\\nMake ai-factory safe to trigger repeatedly.\\n\\nScope\\n- Detect an existing source branch.\\n\\nAcceptance criteria\\n- Re-triggering the same issue does not create duplicate PRs.",
+    "html_url": "https://github.com/liyuerich/ai-factory/issues/44",
     "user": {"login": "yueli"},
     "labels": [{"name": "ai-factory"}]
   },
