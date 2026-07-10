@@ -725,10 +725,7 @@ func executeTask(out io.Writer, task *taskpkg.FactoryTask, taskData []byte, appl
 		return err
 	}
 	if changeRequestAlreadyExists {
-		resultMessage = "FactoryTask completed successfully\n\nChange request already exists."
-		if resultURL != "" {
-			resultMessage = fmt.Sprintf("FactoryTask completed successfully\n\nChange request already exists: %s", resultURL)
-		}
+		resultMessage = changeRequestReportMessage(task, resultURL, true)
 		if err := patchTaskStatus(namespace, task.Metadata.Name, taskpkg.StatusPatchOptions{
 			Phase:            taskpkg.PhaseSucceeded,
 			Reason:           "ChangeRequestAlreadyExists",
@@ -740,7 +737,7 @@ func executeTask(out io.Writer, task *taskpkg.FactoryTask, taskData []byte, appl
 			return err
 		}
 	} else if resultURL != "" {
-		resultMessage = fmt.Sprintf("FactoryTask completed successfully\n\nChange request: %s", resultURL)
+		resultMessage = changeRequestReportMessage(task, resultURL, false)
 		if err := patchTaskStatus(namespace, task.Metadata.Name, taskpkg.StatusPatchOptions{
 			Phase:            taskpkg.PhaseSucceeded,
 			Reason:           "ChangeRequestCreated",
@@ -814,7 +811,100 @@ func buildReportMessage(task *taskpkg.FactoryTask, phase, message string) string
 	if ns := namespaceForTask(task); ns != "" {
 		name = ns + "/" + name
 	}
+	if phase == taskpkg.PhaseFailed {
+		message = friendlyFailureMessage(message)
+	}
 	return fmt.Sprintf("FactoryTask `%s` %s\n\n%s", name, phase, message)
+}
+
+func changeRequestReportMessage(task *taskpkg.FactoryTask, resultURL string, alreadyExists bool) string {
+	status := "Change request created"
+	if alreadyExists {
+		status = "Change request already exists"
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "FactoryTask completed successfully\n\n%s", status)
+	if resultURL != "" {
+		fmt.Fprintf(&b, ": %s", resultURL)
+	}
+	b.WriteString("\n\nValidation")
+	if len(task.Spec.Work.Commands) == 0 {
+		b.WriteString("\n- No validation command configured.")
+	} else {
+		for _, command := range task.Spec.Work.Commands {
+			fmt.Fprintf(&b, "\n- `%s` passed before creating the change request.", command)
+		}
+	}
+	if task.Spec.ChangeRequest.Enabled {
+		changeBranch, targetBranch := changeRequestBranches(task)
+		fmt.Fprintf(&b, "\n\nBranch\n- Source: `%s`\n- Target: `%s`", changeBranch, targetBranch)
+	}
+	b.WriteString("\n\nReview\n- Open the change request and inspect the Files changed tab for the exact file list.")
+	return b.String()
+}
+
+func changeRequestBranches(task *taskpkg.FactoryTask) (string, string) {
+	targetBranch := task.Spec.ChangeRequest.TargetBranch
+	if targetBranch == "" {
+		targetBranch = task.Spec.Source.BaseRef
+	}
+	branchName := task.Spec.ChangeRequest.BranchName
+	if branchName == "" {
+		prefix := task.Spec.ChangeRequest.BranchPrefix
+		if prefix == "" {
+			prefix = "factory-task"
+		}
+		branchName = fmt.Sprintf("%s/%s", strings.Trim(prefix, "/"), dnsLabelForReport(task.Metadata.Name))
+	}
+	return branchName, targetBranch
+}
+
+func dnsLabelForReport(value string) string {
+	value = strings.ToLower(value)
+	var b strings.Builder
+	lastDash := false
+	for _, r := range value {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '.' || r == '-' {
+			b.WriteRune(r)
+			lastDash = false
+			continue
+		}
+		if !lastDash {
+			b.WriteByte('-')
+			lastDash = true
+		}
+	}
+	result := strings.Trim(b.String(), "-.")
+	if result == "" {
+		return "factory-task"
+	}
+	if len(result) <= 63 {
+		return result
+	}
+	return strings.Trim(result[:63], "-.")
+}
+
+func friendlyFailureMessage(message string) string {
+	lower := strings.ToLower(message)
+	reason := ""
+	switch {
+	case strings.Contains(lower, "finish_reason") && strings.Contains(lower, "length"):
+		reason = "Model output was truncated by the token limit."
+	case strings.Contains(lower, "max tool rounds") || strings.Contains(lower, "shell tool limit") || strings.Contains(lower, "tool calls during all final script attempts"):
+		reason = "The agent used all available shell tool rounds before producing a final script."
+	case strings.Contains(lower, "empty repair script"):
+		reason = "The model returned an empty repair script after the generated script failed."
+	case strings.Contains(lower, "api request failed") || strings.Contains(lower, "unexpected eof") || strings.Contains(lower, "timed out"):
+		reason = "The model API or network request failed."
+	case strings.Contains(lower, "go test") && (strings.Contains(lower, "fail") || strings.Contains(lower, "error")):
+		reason = "Validation failed while running Go tests."
+	case strings.Contains(lower, "syntaxerror") || strings.Contains(lower, "syntax error"):
+		reason = "The generated script had a syntax error."
+	}
+	if reason == "" {
+		return message
+	}
+	return fmt.Sprintf("Likely cause: %s\n\n%s", reason, message)
 }
 
 func reportingProvider(task *taskpkg.FactoryTask) string {

@@ -141,6 +141,40 @@ func TestBuildReportMessage(t *testing.T) {
 	}
 }
 
+func TestBuildReportMessageClassifiesAgentFailures(t *testing.T) {
+	task := &taskpkg.FactoryTask{Metadata: taskpkg.ObjectMeta{Name: "validate-ai-factory"}}
+	got := buildReportMessage(task, taskpkg.PhaseFailed, "OpenAI-compatible model reached max tool rounds (40)")
+	if !strings.Contains(got, "Likely cause: The agent used all available shell tool rounds") {
+		t.Fatalf("buildReportMessage() = %q", got)
+	}
+}
+
+func TestChangeRequestReportMessageIncludesReviewContext(t *testing.T) {
+	task := &taskpkg.FactoryTask{
+		Metadata: taskpkg.ObjectMeta{Name: "github-liyuerich-ai-factory-29"},
+		Spec: taskpkg.FactoryTaskSpec{
+			Source: taskpkg.SourceSpec{BaseRef: "main"},
+			Work:   taskpkg.WorkSpec{Commands: []string{"go test ./..."}},
+			ChangeRequest: taskpkg.ChangeRequestSpec{
+				Enabled:      true,
+				BranchPrefix: "factory-task",
+			},
+		},
+	}
+	got := changeRequestReportMessage(task, "https://github.com/liyuerich/ai-factory/pull/30", true)
+	for _, want := range []string{
+		"Change request already exists: https://github.com/liyuerich/ai-factory/pull/30",
+		"`go test ./...` passed",
+		"Source: `factory-task/github-liyuerich-ai-factory-29`",
+		"Target: `main`",
+		"Files changed tab",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("changeRequestReportMessage() missing %q:\n%s", want, got)
+		}
+	}
+}
+
 func TestIssueWebhookHandlerIgnoresMissingRequiredLabel(t *testing.T) {
 	previousOptions := webhookOptions
 	previousServeOptions := webhookServeOptions

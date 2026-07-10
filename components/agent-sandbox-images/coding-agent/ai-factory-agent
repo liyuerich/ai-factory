@@ -38,6 +38,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.error
 import urllib.request
 
@@ -103,26 +104,37 @@ def response_preview(payload):
 
 def post_chat_completion(request, base_url, api_key):
     data = json.dumps(request).encode("utf-8")
-    http_request = urllib.request.Request(
-        f"{base_url}/chat/completions",
-        data=data,
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(http_request, timeout=300) as response:
-            response_body = response.read()
-    except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace")
-        print(f"OpenAI-compatible API request failed: HTTP {exc.code}", file=sys.stderr)
-        print(detail, file=sys.stderr)
-        sys.exit(1)
-    except urllib.error.URLError as exc:
-        print(f"OpenAI-compatible API request failed: {exc}", file=sys.stderr)
-        sys.exit(1)
+    for attempt in range(1, 4):
+        http_request = urllib.request.Request(
+            f"{base_url}/chat/completions",
+            data=data,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(http_request, timeout=300) as response:
+                response_body = response.read()
+                break
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace")
+            retryable = exc.code in (408, 409, 425, 429, 500, 502, 503, 504)
+            if retryable and attempt < 3:
+                print(f"OpenAI-compatible API request failed: HTTP {exc.code}; retrying ({attempt}/3)", file=sys.stderr)
+                time.sleep(2 * attempt)
+                continue
+            print(f"OpenAI-compatible API request failed: HTTP {exc.code}", file=sys.stderr)
+            print(detail, file=sys.stderr)
+            sys.exit(1)
+        except (urllib.error.URLError, TimeoutError, ConnectionError) as exc:
+            if attempt < 3:
+                print(f"OpenAI-compatible API request failed: {exc}; retrying ({attempt}/3)", file=sys.stderr)
+                time.sleep(2 * attempt)
+                continue
+            print(f"OpenAI-compatible API request failed: {exc}", file=sys.stderr)
+            sys.exit(1)
 
     try:
         return json.loads(response_body)
@@ -249,7 +261,9 @@ Return only a POSIX shell script. Do not wrap it in Markdown.
 Your response must start with a shell command or a shebang.
 Do not spend tokens explaining your plan. The generated shell script can inspect the repository at runtime with commands such as find, rg, sed, and test commands already used by this repository.
 The script must modify the checked-out repository to satisfy the task.
-Use small, focused edits. Run local checks when practical.
+Use small, focused edits. Prefer reading only directly relevant files. Avoid broad repository dumps unless the task is explicitly about repository-wide behavior.
+If the task is complex, make a compact implementation plan inside the shell script and execute it in small functions instead of asking for many exploratory tool calls.
+Run local checks when practical.
 Do not assume optional CLIs such as yq are installed. For YAML syntax checks, prefer python3 with the yaml module.
 Do not change go.mod or go.sum only to work around the local Go toolchain version; the sandbox is expected to provide the repository's declared Go version.
 Do not print secrets. Do not commit, push, or open pull requests.
