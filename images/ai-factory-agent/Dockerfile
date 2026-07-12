@@ -23,7 +23,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY components/agent-sandbox-images/coding-agent/ai-factory-agent /usr/local/bin/ai-factory-agent
-COPY images/ai-on-gke-agent/entrypoint.sh /entrypoint.sh
+COPY images/ai-factory-agent/entrypoint.sh /entrypoint.sh
 RUN chmod 755 /usr/local/bin/ai-factory-agent /entrypoint.sh
 
 ENTRYPOINT ["/entrypoint.sh"]

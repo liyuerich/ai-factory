@@ -3,7 +3,7 @@ set -eu
 
 : "${AGENT_NAME:?AGENT_NAME environment variable is required}"
 
-REPOSITORY_URL="${REPOSITORY_URL:-https://github.com/ai-on-gke/ai-factory.git}"
+REPOSITORY_URL="${REPOSITORY_URL:-https://github.com/liyuerich/ai-factory.git}"
 REPOSITORY_REF="${REPOSITORY_REF:-main}"
 AGENT_COMMAND="${AGENT_COMMAND:-ai-factory-agent openai-compatible}"
 
