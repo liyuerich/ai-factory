@@ -15,7 +15,6 @@
 FROM node:22-bookworm
 
 ARG DEBIAN_FRONTEND=noninteractive
-ARG INSTALL_GEMINI_CLI=true
 ARG INSTALL_CODEX_CLI=false
 ARG GO_VERSION=1.25.4
 
@@ -60,10 +59,7 @@ RUN go_arch="$(dpkg --print-architecture)" \
     && rm /tmp/go.tgz \
     && go version
 
-RUN if [ "${INSTALL_GEMINI_CLI}" = "true" ]; then \
-        npm install -g @google/gemini-cli; \
-    fi \
-    && if [ "${INSTALL_CODEX_CLI}" = "true" ]; then \
+RUN if [ "${INSTALL_CODEX_CLI}" = "true" ]; then \
         npm install -g @openai/codex; \
     fi \
     && npm cache clean --force

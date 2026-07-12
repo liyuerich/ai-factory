@@ -241,13 +241,6 @@ Work in a plan-first, small-step style:
 
 EOF
 cat .ai-factory/task-instructions.md >> "$PROMPT_INPUT"
-export GEMINI_CLI_TRUST_WORKSPACE="${GEMINI_CLI_TRUST_WORKSPACE:-true}"
-if [ -n "${GEMINI_SERVICE_PORTAL:-}" ]; then
-  export HTTPS_PROXY="$GEMINI_SERVICE_PORTAL"
-fi
-if [ -n "${GEMINI_SERVICE_PORTAL_CA_CERTS:-}" ]; then
-  export NODE_EXTRA_CA_CERTS="$GEMINI_SERVICE_PORTAL_CA_CERTS"
-fi
 /bin/sh -lc %s < "$PROMPT_INPUT"`,
 		shellQuote(workDir),
 		shellQuote(encodedInstructions),

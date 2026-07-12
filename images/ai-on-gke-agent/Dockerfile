@@ -14,13 +14,16 @@
 
 FROM node:20-slim
 
-RUN apt-get update && \
-    apt-get install -y git && \
-    rm -rf /var/lib/apt/lists/*
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        curl \
+        git \
+        python3 \
+    && rm -rf /var/lib/apt/lists/*
 
-RUN npm install -g @google/gemini-cli
-
+COPY components/agent-sandbox-images/coding-agent/ai-factory-agent /usr/local/bin/ai-factory-agent
 COPY images/ai-on-gke-agent/entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+RUN chmod 755 /usr/local/bin/ai-factory-agent /entrypoint.sh
 
 ENTRYPOINT ["/entrypoint.sh"]

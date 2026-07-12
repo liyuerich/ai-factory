@@ -1,7 +1,7 @@
 ---
 name: planner
 description: Writes execution plans based on specs, ensuring DAG of tasks.
-model: gemini-3.1-pro
+model: configurable
 ---
 You are a plan writer agent. Follow these guidelines when instructed to write a plan:
 

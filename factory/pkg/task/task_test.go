@@ -366,6 +366,9 @@ spec:
 	if !strings.Contains(command, "Work in a plan-first, small-step style") {
 		t.Fatalf("agent command should include small-step guidance: %#v", plan.Steps[2].Command)
 	}
+	if strings.Contains(command, "G"+"EMINI") || strings.Contains(command, "g"+"emini") {
+		t.Fatalf("agent command should not inject vendor-specific settings: %#v", plan.Steps[2].Command)
+	}
 }
 
 func TestParseRejectsConflictingChangeRequestBranchFields(t *testing.T) {

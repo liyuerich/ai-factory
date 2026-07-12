@@ -31,7 +31,7 @@ on:
       command:
         description: Command executed in the sandbox after clone and checkout.
         required: true
-        default: test -f factory/pkg/task/controller.go && git --version && go version && node --version && python3 --version && gemini --version
+        default: test -f factory/pkg/task/controller.go && git --version && go version && node --version && python3 --version && command -v ai-factory-agent
 
 jobs:
   run-once:

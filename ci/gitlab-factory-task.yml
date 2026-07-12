@@ -1,0 +1,43 @@
+stages:
+  - ai-factory
+
+ai-factory-issue:
+  stage: ai-factory
+  tags:
+    - ai-factory
+  resource_group: ai-factory-${CI_PROJECT_ID}-${AI_FACTORY_ISSUE_IID}
+  timeout: 45 minutes
+  variables:
+    KIND_CLUSTER_NAME: ai-factory-${CI_PIPELINE_ID}
+    AI_FACTORY_TRIGGER_LABEL: ai-factory-run
+    AI_FACTORY_SOURCE_URL: https://github.com/liyuerich/ai-factory.git
+    AI_FACTORY_RUN_AGENT_COMMAND: ai-factory-agent openai-compatible
+    AI_FACTORY_RUN_VALIDATION_COMMAND: go test ./...
+  rules:
+    - if: '$AI_FACTORY_ISSUE_IID'
+    - when: never
+  script:
+    - |
+      if [[ -x "${CI_PROJECT_DIR}/components/factory-task/install" ]]; then
+        export AI_FACTORY_SOURCE_DIR="${CI_PROJECT_DIR}"
+      else
+        export AI_FACTORY_SOURCE_DIR="${CI_PROJECT_DIR}/.ai-factory-src"
+      fi
+      if [[ ! -x "${AI_FACTORY_SOURCE_DIR}/ci/gitlab-factory-task.sh" ]]; then
+        rm -rf "${AI_FACTORY_SOURCE_DIR}"
+        if [[ -n "${AI_FACTORY_SOURCE_TOKEN:-}" ]]; then
+          git -c "http.extraHeader=JOB-TOKEN: ${AI_FACTORY_SOURCE_TOKEN}" \
+            clone --depth=1 --branch "${AI_FACTORY_SOURCE_REF:-main}" \
+            "${AI_FACTORY_SOURCE_URL}" "${AI_FACTORY_SOURCE_DIR}"
+        else
+          git clone --depth=1 --branch "${AI_FACTORY_SOURCE_REF:-main}" \
+            "${AI_FACTORY_SOURCE_URL}" "${AI_FACTORY_SOURCE_DIR}"
+        fi
+      fi
+      "${AI_FACTORY_SOURCE_DIR}/ci/gitlab-factory-task.sh"
+  artifacts:
+    when: always
+    expire_in: 7 days
+    paths:
+      - .ai-factory-*.json
+      - .ai-factory-*.log

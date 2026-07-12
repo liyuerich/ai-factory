@@ -275,6 +275,98 @@ func TestIssueWebhookHandlerIgnoresMissingRequiredLabel(t *testing.T) {
 	}
 }
 
+func TestGitLabPipelineTriggerHandler(t *testing.T) {
+	oldWebhookOptions := webhookOptions
+	oldPipelineOptions := webhookTriggerPipelineOptions
+	t.Cleanup(func() {
+		webhookOptions = oldWebhookOptions
+		webhookTriggerPipelineOptions = oldPipelineOptions
+	})
+	webhookOptions = struct {
+		provider                  string
+		namespace                 string
+		agent                     string
+		agentCommand              string
+		agentEnv                  []string
+		promptRef                 string
+		sandboxTemplateRef        string
+		containerName             string
+		reportingMode             string
+		command                   []string
+		triggerAction             []string
+		requireLabel              []string
+		repository                []string
+		changeRequest             bool
+		changeRequestAuthTokenEnv string
+	}{}
+	webhookTriggerPipelineOptions = struct {
+		addr     string
+		secret   string
+		tokenEnv string
+		ref      string
+		apiBase  string
+	}{
+		secret:   "webhook-secret",
+		tokenEnv: "GITLAB_TOKEN",
+		ref:      "main",
+	}
+	t.Setenv("GITLAB_TOKEN", "pipeline-token")
+
+	var pipelineRequest *http.Request
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		pipelineRequest = r
+		_ = r.ParseForm()
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"id":17,"status":"created","web_url":"https://gitlab.example.com/platform/app/-/pipelines/17"}`)
+	}))
+	defer api.Close()
+	webhookTriggerPipelineOptions.apiBase = api.URL + "/api/v4"
+
+	payload := []byte(`{
+	  "object_kind": "issue",
+	  "event_type": "issue",
+	  "user": {"username": "yueli"},
+	  "project": {
+	    "path_with_namespace": "platform/app",
+	    "web_url": "https://gitlab.example.com/platform/app",
+	    "default_branch": "main",
+	    "git_http_url": "https://gitlab.example.com/platform/app.git"
+	  },
+	  "object_attributes": {
+	    "iid": 9,
+	    "title": "Add docs",
+	    "description": "Document the setup.",
+	    "url": "https://gitlab.example.com/platform/app/-/issues/9",
+	    "action": "open"
+	  },
+	  "labels": [{"title": "ai-factory-run"}]
+	}`)
+	req := httptest.NewRequest(http.MethodPost, "/webhook/gitlab", bytes.NewReader(payload))
+	req.Header.Set("X-Gitlab-Token", "webhook-secret")
+	resp := httptest.NewRecorder()
+
+	gitLabPipelineTriggerHandler(&cobra.Command{})(resp, req)
+
+	if resp.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want %d; body=%s", resp.Code, http.StatusAccepted, resp.Body.String())
+	}
+	if pipelineRequest == nil {
+		t.Fatal("pipeline API was not called")
+	}
+	if pipelineRequest.Header.Get("PRIVATE-TOKEN") != "pipeline-token" {
+		t.Fatalf("PRIVATE-TOKEN = %q", pipelineRequest.Header.Get("PRIVATE-TOKEN"))
+	}
+	if pipelineRequest.FormValue("ref") != "main" {
+		t.Fatalf("ref = %q, want main", pipelineRequest.FormValue("ref"))
+	}
+	if pipelineRequest.FormValue("variables[AI_FACTORY_ISSUE_IID]") != "9" {
+		t.Fatalf("issue IID = %q, want 9", pipelineRequest.FormValue("variables[AI_FACTORY_ISSUE_IID]"))
+	}
+	if !strings.Contains(resp.Body.String(), `"pipeline":17`) {
+		t.Fatalf("body = %s, want pipeline result", resp.Body.String())
+	}
+}
+
 func TestPlanDryRunValid(t *testing.T) {
 	content := []byte(`apiVersion: factory.ai.gke.io/v1alpha1
 kind: FactoryTask

@@ -22,8 +22,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 
@@ -314,6 +316,25 @@ var webhookServeCmd = &cobra.Command{
 	},
 }
 
+var webhookTriggerPipelineOptions struct {
+	addr     string
+	secret   string
+	tokenEnv string
+	ref      string
+	apiBase  string
+}
+
+var webhookTriggerPipelineCmd = &cobra.Command{
+	Use:   "trigger-pipeline",
+	Short: "Trigger a GitLab CI pipeline from an issue webhook",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		mux := http.NewServeMux()
+		mux.HandleFunc("/webhook/gitlab", gitLabPipelineTriggerHandler(cmd))
+		fmt.Fprintf(cmd.OutOrStdout(), "listening on %s\n", webhookTriggerPipelineOptions.addr)
+		return http.ListenAndServe(webhookTriggerPipelineOptions.addr, mux)
+	},
+}
+
 var manifestCmd = &cobra.Command{
 	Use:   "manifest [file]",
 	Short: "Render the SandboxClaim manifest a FactoryTask would create",
@@ -440,6 +461,7 @@ func init() {
 	changeRequestCmd.AddCommand(changeRequestCreateCmd)
 	webhookCmd.AddCommand(webhookRenderCmd)
 	webhookCmd.AddCommand(webhookServeCmd)
+	webhookCmd.AddCommand(webhookTriggerPipelineCmd)
 	controllerCmd.AddCommand(manifestCmd)
 	controllerCmd.AddCommand(runOnceCmd)
 	controllerCmd.AddCommand(watchCmd)
@@ -473,6 +495,11 @@ func init() {
 	webhookServeCmd.Flags().StringVar(&webhookServeOptions.secret, "secret", "", "webhook secret for GitHub signatures or GitLab tokens")
 	webhookServeCmd.Flags().BoolVar(&webhookServeOptions.apply, "apply", false, "apply generated FactoryTasks with kubectl")
 	webhookServeCmd.Flags().BoolVar(&webhookServeOptions.responseYAML, "response-yaml", false, "write generated FactoryTask YAML in HTTP responses")
+	webhookTriggerPipelineCmd.Flags().StringVar(&webhookTriggerPipelineOptions.addr, "addr", ":8080", "listen address")
+	webhookTriggerPipelineCmd.Flags().StringVar(&webhookTriggerPipelineOptions.secret, "secret", "", "GitLab webhook token")
+	webhookTriggerPipelineCmd.Flags().StringVar(&webhookTriggerPipelineOptions.tokenEnv, "token-env", "GITLAB_TOKEN", "environment variable containing the GitLab API token")
+	webhookTriggerPipelineCmd.Flags().StringVar(&webhookTriggerPipelineOptions.ref, "ref", "", "pipeline ref; defaults to the issue repository default branch")
+	webhookTriggerPipelineCmd.Flags().StringVar(&webhookTriggerPipelineOptions.apiBase, "api-base", "", "GitLab API base URL; defaults to https://<host>/api/v4")
 	watchCmd.Flags().StringVarP(&watchOptions.namespace, "namespace", "n", "default", "FactoryTask namespace")
 	watchCmd.Flags().DurationVar(&watchOptions.interval, "interval", 15*time.Second, "time between FactoryTask list polls")
 	watchCmd.Flags().DurationVar(&watchOptions.timeout, "timeout", 5*time.Minute, "time to wait for each SandboxClaim to become Ready")
@@ -597,6 +624,107 @@ func verifyIssueWebhookRequest(provider string, body []byte, req *http.Request) 
 		return taskpkg.VerifyGitLabWebhookToken(webhookServeOptions.secret, req.Header.Get("X-Gitlab-Token"))
 	default:
 		return fmt.Errorf("unsupported webhook provider %q", provider)
+	}
+}
+
+func gitLabPipelineTriggerHandler(cmd *cobra.Command) http.HandlerFunc {
+	return func(w http.ResponseWriter, req *http.Request) {
+		if req.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		body, err := io.ReadAll(req.Body)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("read body: %v", err), http.StatusBadRequest)
+			return
+		}
+		if err := taskpkg.VerifyGitLabWebhookToken(webhookTriggerPipelineOptions.secret, req.Header.Get("X-Gitlab-Token")); err != nil {
+			http.Error(w, err.Error(), http.StatusUnauthorized)
+			return
+		}
+
+		event, err := taskpkg.ParseIssueWebhook(body, taskpkg.ProviderGitLab)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		opts := issueWebhookOptions()
+		opts.Provider = taskpkg.ProviderGitLab
+		if len(opts.RequiredLabels) == 0 {
+			opts.RequiredLabels = []string{"ai-factory-run"}
+		}
+		if ok, reason := taskpkg.ShouldTriggerIssue(event, opts); !ok {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusAccepted)
+			fmt.Fprintf(w, `{"ignored":true,"reason":%q}`+"\n", reason)
+			fmt.Fprintf(cmd.OutOrStdout(), "--- PIPELINE IGNORED: gitlab %s\n", reason)
+			return
+		}
+
+		tokenEnv := webhookTriggerPipelineOptions.tokenEnv
+		if tokenEnv == "" {
+			tokenEnv = "GITLAB_TOKEN"
+		}
+		token := os.Getenv(tokenEnv)
+		if token == "" {
+			http.Error(w, fmt.Sprintf("%s is required to trigger a GitLab pipeline", tokenEnv), http.StatusInternalServerError)
+			return
+		}
+
+		apiBase := webhookTriggerPipelineOptions.apiBase
+		if apiBase == "" {
+			apiBase = fmt.Sprintf("https://%s/api/v4", event.RepositoryHost)
+		}
+		ref := webhookTriggerPipelineOptions.ref
+		if ref == "" {
+			ref = event.DefaultBranch
+		}
+		if ref == "" {
+			ref = "main"
+		}
+		form := url.Values{}
+		form.Set("ref", ref)
+		form.Set("variables[AI_FACTORY_ISSUE_IID]", strconv.Itoa(event.IssueNumber))
+		form.Set("variables[AI_FACTORY_ISSUE_ACTION]", event.Action)
+		form.Set("variables[AI_FACTORY_ISSUE_URL]", event.IssueURL)
+		form.Set("variables[AI_FACTORY_TRIGGER_LABEL]", opts.RequiredLabels[0])
+		endpoint := fmt.Sprintf("%s/projects/%s/pipeline",
+			strings.TrimRight(apiBase, "/"), url.PathEscape(event.Repository))
+		pipelineReq, err := http.NewRequest(http.MethodPost, endpoint, strings.NewReader(form.Encode()))
+		if err != nil {
+			http.Error(w, fmt.Sprintf("create GitLab pipeline request: %v", err), http.StatusInternalServerError)
+			return
+		}
+		pipelineReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		pipelineReq.Header.Set("PRIVATE-TOKEN", token)
+		resp, err := http.DefaultClient.Do(pipelineReq)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("trigger GitLab pipeline: %v", err), http.StatusBadGateway)
+			return
+		}
+		defer resp.Body.Close()
+		responseBody, err := io.ReadAll(resp.Body)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("read GitLab pipeline response: %v", err), http.StatusBadGateway)
+			return
+		}
+		if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+			http.Error(w, fmt.Sprintf("GitLab pipeline returned %s: %s", resp.Status, strings.TrimSpace(string(responseBody))), http.StatusBadGateway)
+			return
+		}
+
+		var pipeline struct {
+			ID     int    `json:"id"`
+			Status string `json:"status"`
+			WebURL string `json:"web_url"`
+		}
+		_ = json.Unmarshal(responseBody, &pipeline)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		fmt.Fprintf(w, `{"triggered":true,"project":%q,"issue":%d,"pipeline":%d,"status":%q,"web_url":%q}`+"\n",
+			event.Repository, event.IssueNumber, pipeline.ID, pipeline.Status, pipeline.WebURL)
+		fmt.Fprintf(cmd.OutOrStdout(), "--- PIPELINE: gitlab %s issue #%d -> pipeline %d\n",
+			event.Repository, event.IssueNumber, pipeline.ID)
 	}
 }
 

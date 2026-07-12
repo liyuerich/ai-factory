@@ -1,0 +1,7 @@
+include:
+  - local: ci/gitlab-factory-task.yml
+
+workflow:
+  rules:
+    - if: '$AI_FACTORY_ISSUE_IID'
+    - when: never

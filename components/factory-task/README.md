@@ -1,5 +1,8 @@
 # FactoryTask runtime
 
+For the complete GitHub Actions + kind and GitLab Runner + kind setup, see
+docs/guide.md.
+
 `components/factory-task/install` always installs the `FactoryTask` CRD. Set
 `INSTALL_FACTORY_TASK_RUNTIME=true` to also deploy the runtime controllers:
 
@@ -16,8 +19,8 @@ INSTALL_FACTORY_TASK_RUNTIME=true \
 GITHUB_TOKEN=... \
 GITLAB_TOKEN=... \
 OPENAI_API_KEY=... \
-OPENAI_BASE_URL=https://api.moonshot.cn/v1 \
-OPENAI_MODEL=<kimi-model> \
+OPENAI_BASE_URL=https://api.example.com/v1 \
+OPENAI_MODEL=provider-model \
 WEBHOOK_SECRET=... \
 components/factory-task/install
 ```
@@ -204,8 +207,8 @@ provider such as Kimi, DeepSeek, Qwen, Ollama, or vLLM:
 
 | Variable | Example | Purpose |
 | --- | --- | --- |
-| `AI_FACTORY_OPENAI_BASE_URL` | `https://api.moonshot.cn/v1` | API base URL. |
-| `AI_FACTORY_OPENAI_MODEL` | `kimi-latest` | Model name. |
+| `AI_FACTORY_OPENAI_BASE_URL` | `https://api.example.com/v1` | API base URL. |
+| `AI_FACTORY_OPENAI_MODEL` | `provider-model` | Model name. |
 | `AI_FACTORY_OPENAI_TEMPERATURE` | `1` | Sampling temperature. |
 | `AI_FACTORY_OPENAI_MAX_TOKENS` | `48000` | Maximum response tokens. |
 | `AI_FACTORY_OPENAI_MAX_TOOL_ROUNDS` | `40` | Maximum Shell tool call rounds. |
@@ -260,6 +263,27 @@ reviewed it.
 - Keep `AI_FACTORY_OPENAI_API_KEY` and `AI_FACTORY_GITHUB_TOKEN` as repository
   secrets and do not log them in issues.
 
+## GitLab Runner + kind
+
+The repository includes `ci/gitlab-factory-task.yml` and
+`ci/gitlab-factory-task.sh` for the GitLab Runner + kind architecture. A
+target GitLab project can include the CI template from this repository, set
+`AI_FACTORY_ISSUE_IID`, and run the same provider-neutral webhook and
+FactoryTask flow used by the GitHub Actions path.
+
+The Runner must provide `docker`, `kind`, `kubectl`, `go`, `jq`,
+`curl`, and `git`. Docker-in-Docker or a shell runner with a privileged
+Docker daemon is required because kind starts Kubernetes node containers.
+Keep `GITLAB_TOKEN`, `GITLAB_WEBHOOK_SECRET`, and `OPENAI_API_KEY`
+masked. Set `AI_FACTORY_SOURCE_URL` to a readable GitLab mirror when the
+target project does not contain the ai-factory source checkout.
+
+For automatic Issue-to-pipeline triggering, run
+`factory task webhook trigger-pipeline` as a small always-on internal service.
+It validates the GitLab webhook token and label, then starts the target
+pipeline with the Issue IID. The Runner remains the only component that
+creates kind and executes the Agent.
+
 ## Agent runner
 
 Webhook-generated tasks now use the issue title/body as
@@ -279,7 +303,7 @@ shell script, and executes that script in the cloned repository. It uses:
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `OPENAI_API_KEY` | required | API key for the compatible provider. |
-| `OPENAI_BASE_URL` | `https://api.openai.com/v1` | API base URL. For Kimi, use `https://api.moonshot.cn/v1`. |
+| `OPENAI_BASE_URL` | `https://api.openai.com/v1` | OpenAI-compatible API base URL. |
 | `OPENAI_MODEL` | `gpt-4.1` | Model name for the provider. |
 | `OPENAI_TEMPERATURE` | `1` | Sampling temperature. |
 | `OPENAI_MAX_TOKENS` | `48000` | Maximum response tokens for the generated script. |

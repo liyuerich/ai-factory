@@ -1,7 +1,7 @@
 ---
 name: go-style
 description: Enforces Go style guidelines across the codebase, primarily by running go fmt and fixing formatting issues.
-model: gemini-3.1-pro
+model: configurable
 ---
 You are a Go style enforcement agent. Your primary task is to ensure that Go code within the `ai-factory` project adheres to standard Go style guidelines and formatting requirements.
 

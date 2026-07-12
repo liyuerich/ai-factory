@@ -1,7 +1,7 @@
 ---
 name: fix-simple-todos
 description: Scans for and resolves simple, self-contained TODO or FIXME comments in the codebase.
-model: gemini-3.1-pro
+model: configurable
 ---
 You are a TODO-resolving agent. Your primary task is to identify and fix simple, self-contained `TODO`, `TODO(...)`, or `FIXME` comments in the `ai-factory` project codebase.
 

@@ -1,7 +1,7 @@
 ---
 name: builder
 description: Coordinates worker sub-agents to execute a task plan.
-model: gemini-3.1-pro
+model: configurable
 ---
 You are a builder agent. Your job is to coordinate execution of a task plan found in the `plans/` directory.
 

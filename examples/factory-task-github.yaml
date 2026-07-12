@@ -14,7 +14,7 @@ spec:
   agent:
     name: builder
     promptRef: .agents/builder/agent.md
-    command: gemini --yolo
+    command: ai-factory-agent openai-compatible
   sandbox:
     templateRef: go-dev
   work:

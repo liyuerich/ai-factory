@@ -5,9 +5,8 @@ usage() {
     cat >&2 <<'EOF'
 Usage:
   ai-factory-agent openai-compatible
-  ai-factory-agent gemini [args...]
   ai-factory-agent codex [args...]
-  ai-factory-agent [args...]
+  ai-factory-agent --help
 
 OpenAI-compatible mode reads the FactoryTask prompt from stdin and executes a
 model-generated shell script in the current repository.
@@ -465,10 +464,6 @@ case "${1:-}" in
         run_openai_compatible "$@"
         exit $?
         ;;
-    gemini)
-        shift
-        exec gemini --yolo "$@"
-        ;;
     codex)
         shift
         exec codex "$@"
@@ -479,17 +474,10 @@ case "${1:-}" in
         ;;
 esac
 
-if command -v gemini >/dev/null 2>&1; then
-    exec gemini --yolo "$@"
-fi
-
-if command -v codex >/dev/null 2>&1; then
-    exec codex "$@"
-fi
-
 if [ -n "${OPENAI_API_KEY:-}" ]; then
     run_openai_compatible "$@"
+    exit $?
 fi
 
-echo "No supported coding agent CLI found. Install gemini/codex or set OPENAI_API_KEY for openai-compatible mode." >&2
+echo "No agent command selected. Set AGENT_COMMAND/spec.agent.command, or provide OPENAI_API_KEY for openai-compatible mode." >&2
 exit 127

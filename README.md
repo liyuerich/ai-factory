@@ -1,166 +1,138 @@
-# AI Factory
+# ai-factory
 
-This project is an experiment in whether a coding agent can self-assemble. In other words, can a coding agent build an unattended coding-agent that can "brainstorm" ideas, open issues, create PRs to fix those issues, merge them automatically, and iterate towards an end state.
+ai-factory turns a repository task into a controlled coding-agent run:
 
-This project's end state is "self-hosting": building the coding agent that can perform these tasks autonomously.
+    Issue -> FactoryTask -> sandbox -> agent -> validation -> branch/commit -> PR or MR
 
-We will rely on a Kubernetes cluster and run agents in sandboxes provided by [agent-sandbox](https://github.com/kubernetes-sigs/agent-sandbox). GKE is the first supported managed environment, but the install flow is intended to work with any Kubernetes cluster reachable through the current `kubectl` context. We will initially use `gemini-cli` as our coding agent. We will assume this infrastructure exists initially, but will work towards building the infrastructure to run this experiment purely agentically.
+The orchestration layer is provider-neutral. It can read GitHub or GitLab issue
+events, clone the repository described by the event, run a configured agent in
+an agent-sandbox environment, report status back to the issue, and create an
+idempotent pull request or merge request.
 
-## Repository Structure
+## Supported execution architectures
 
-- `.agents/`: Definitions and instructions for the various AI agents that operate within this repository (e.g., `builder`, `planner`, `reviewer`, `speccer`). Each agent has its own `agent.md` defining its persona, tools, and goals.
-- `components/`: Software components intended for installation on Kubernetes. Each component has its own installation logic (e.g., `components/<name>/install`), which is invoked by the master `components/install` script. This includes infrastructure like `agent-sandbox` which provides the Kubernetes-native sandboxes where our AI agents execute.
-- `tool/`: Go-based CLI tooling used within the repository, including tools for validating plans and specifications.
-- `specs/` & `plans/`: Documents generated during the Spec-Driven Development process for complex features.
-- `AGENTS.md`: Crucial instructions and architectural details for AI agents operating in this repository. Agents must read and update this file to share knowledge.
-- `SOUL.md`: The core principles, goals, and "personality" constraints that guide the AI Factory's autonomous evolution.
+The project uses two execution paths:
 
-## Architecture & Development Process
+- GitHub projects use GitHub Actions and a temporary kind cluster.
+- GitLab projects use GitLab Runner and a temporary kind cluster.
 
-The AI Factory is designed as a set of Kubernetes-native workloads and operators. The default installer targets the active `kubectl` context; GKE-specific credential setup remains available by setting `KUBECONFIG_MODE=gke`.
+In both paths ai-factory supplies the common task model, sandbox plan, agent
+runner, Git authentication, validation, failure classification, retry policy,
+issue comments, and PR/MR creation. A permanent Kubernetes cluster is optional;
+it is only needed for a shared, always-on runtime or high task volume.
 
-For a generic Kubernetes cluster, select the target context first and provide a writable image registry prefix:
+The step-by-step setup for both providers is in
+docs/guide.md.
 
-```bash
-kubectl config use-context <cluster-context>
-IMAGE_PREFIX=registry.example.com/ai-factory/ components/install
-```
+## Repository structure
 
-For a local or remote kind cluster, point `kubectl` at the cluster first, provide a tag that is already present in the kind nodes or can be loaded by `agent-sandbox`, and optionally reuse a local checkout of `agent-sandbox`:
+- components/agent-sandbox: installs the agent-sandbox controllers.
+- components/agent-sandbox-images/coding-agent: builds the generic coding image.
+- components/factory-task: installs the FactoryTask CRD and runtime components.
+- factory/pkg/task: provider-neutral task, webhook, agent-plan, status, and
+  change-request logic.
+- .github/workflows/issue-factorytask.yaml: GitHub Issue to kind to PR flow.
+- .github/workflows/ai-factory-issue-reusable.yaml: reusable GitHub workflow
+  for other repositories.
+- .gitlab-ci.yml: GitLab Runner to kind to MR flow.
+- examples: hand-written GitHub and GitLab FactoryTask examples.
 
-```bash
-export KUBECONFIG=/path/to/kubeconfig
-kubectl cluster-info
+## Agent model and runner configuration
 
-IMAGE_PREFIX=localhost/ai-factory/ \
-IMAGE_TAG=dev \
-KIND_CLUSTER_NAME=fire-kind-cluster \
-AGENT_SANDBOX_SRC=/path/to/agent-sandbox \
-components/agent-sandbox/install
-```
+The default command is:
 
-If the controller image was built and loaded into kind manually, skip the build step and only apply the manifests:
+    ai-factory-agent openai-compatible
 
-```bash
-IMAGE_PREFIX=localhost/ai-factory/ \
-IMAGE_TAG=dev \
-AGENT_SANDBOX_SRC=/path/to/agent-sandbox \
-AGENT_SANDBOX_BUILD_IMAGES=false \
-components/agent-sandbox/install
-```
+This runner works with any provider that exposes a compatible
+chat/completions endpoint. The model provider is selected at runtime:
 
-After installation, run a small end-to-end sandbox check. By default this creates a warm pool and claim, copies this repository into the sandbox, and validates the `factory-runtime-proxy` spec from inside the sandbox:
+    OPENAI_API_KEY=...
+    OPENAI_BASE_URL=https://api.example.com/v1
+    OPENAI_MODEL=provider-model
 
-```bash
-DEV_IMAGE=golang:latest components/agent-sandbox/smoke-test
-```
+Kimi, OpenAI-compatible gateways, self-hosted models, and other compatible
+providers can use the same runner. The names OPENAI_API_KEY, OPENAI_BASE_URL,
+and OPENAI_MODEL describe the protocol contract, not a required vendor.
 
-Use a mirror image if the cluster cannot pull directly from Docker Hub:
+An alternate CLI can be selected without changing ai-factory:
 
-```bash
-DEV_IMAGE=docker.m.daocloud.io/library/golang:1.26.4 components/agent-sandbox/smoke-test
-```
+    AGENT_COMMAND="ai-factory-agent codex"
 
-For GKE, the installer can fetch credentials and derive a GCR image prefix from `gcloud`:
+or with spec.agent.command on a hand-written FactoryTask. The coding image
+does not require a specific provider CLI.
 
-```bash
-KUBECONFIG_MODE=gke CLUSTER_NAME=ai-factory ZONE=us-central1-a components/install
-```
+## Local Kubernetes setup
 
-Optional GKE-oriented components such as `service-portals` are disabled by default and can be enabled with `INSTALL_SERVICE_PORTALS=true`.
+The installers use the active kubectl context and work with kind, a native
+Kubernetes cluster, or GKE. Select a context first:
 
-The next control-plane layer is `FactoryTask`, a Kubernetes custom resource that captures one coding-agent task without coupling the task to a specific Git provider. A task can reference either GitHub or GitLab repositories through the same source contract:
+    kubectl config use-context <cluster-context>
+    kubectl cluster-info
 
-```yaml
-source:
-  provider: github # or gitlab
-  host: github.com
-  repository: liyuerich/ai-factory
-  baseRef: main
-```
+Install agent-sandbox, then build or load the coding-agent image. For a kind
+cluster:
 
-Install the CRD with:
+    export KUBECONFIG=/path/to/kubeconfig
+    IMAGE_PREFIX=localhost/ai-factory/ \
+    IMAGE_TAG=dev \
+    KIND_CLUSTER_NAME=<kind-cluster-name> \
+    AGENT_SANDBOX_SRC=/path/to/agent-sandbox \
+    components/agent-sandbox/install
 
-```bash
-components/factory-task/install
-```
+Install the FactoryTask CRD:
 
-Validate or inspect a task locally with:
+    components/factory-task/install
 
-```bash
-go run ./factory/cmd/factory task validate examples/factory-task-github.yaml
-go run ./factory/cmd/factory task plan examples/factory-task-gitlab.yaml
-```
+Validate, inspect, or run a hand-written task:
 
-Render the first controller output, a `SandboxClaim`, without touching a cluster:
+    go run ./factory/cmd/factory task validate examples/factory-task-github.yaml
+    go run ./factory/cmd/factory task plan examples/factory-task-gitlab.yaml
+    go run ./factory/cmd/factory task controller manifest examples/factory-task-github.yaml
+    go run ./factory/cmd/factory task controller run-once examples/factory-task-github.yaml
 
-```bash
-go run ./factory/cmd/factory task controller manifest examples/factory-task-github.yaml
-```
+For a long-running local controller:
 
-Run one task against the active `kubectl` context:
+    go run ./factory/cmd/factory task controller watch --namespace default
 
-```bash
-go run ./factory/cmd/factory task controller run-once examples/factory-task-github.yaml
-```
+The full provider setup, secrets, labels, runner prerequisites, and
+troubleshooting steps are in docs/guide.md and
+components/factory-task/README.md.
 
-The `run-once` command is the first controller slice: it applies the `FactoryTask`, patches task status through the task lifecycle, creates the `SandboxClaim`, waits for agent-sandbox to bind a sandbox, and executes the generated plan inside the sandbox container.
-When `spec.work.instructions` is set, the plan runs the configured coding agent
-inside the cloned repository before running `spec.work.commands`. The default
-agent command is `ai-factory-agent openai-compatible`; override it with
-`spec.agent.command`.
+## GitHub issue tasks
 
-Patch task status directly when debugging a controller transition:
+The GitHub Actions workflow listens for Issue labeled and reopened events,
+creates a temporary kind cluster, installs agent-sandbox, creates a
+FactoryTask, and runs the watch controller.
 
-```bash
-go run ./factory/cmd/factory task controller patch-status validate-ai-factory-spec \
-  --phase Running \
-  --reason ManualDebug \
-  --message "debugging status patch"
-```
+Use these labels:
 
-Run the first long-running controller loop against the active `kubectl` context:
+- ai-factory: identifies a task for this repository's automation.
+- ai-factory-run: permits the real agent, branch, commit, push, and PR flow.
+- ai-factory-smoke: runs the safe smoke change-request flow.
 
-```bash
-go run ./factory/cmd/factory task controller watch --namespace default
-```
+Configure the API key as a repository secret and provider settings as repository
+variables. See docs/guide.md for the exact GitHub UI steps.
 
-The watch controller polls `FactoryTask` resources, reconciles tasks whose phase is empty, `Pending`, `ClaimCreated`, or `SandboxReady`, creates the matching `SandboxClaim`, executes the generated plan, and patches status. Use `--once` for a single reconciliation pass and `--retry-failed` to retry failed tasks.
+## GitLab issue tasks
 
-Deploy the long-running FactoryTask runtime into the active cluster with:
+The GitLab CI template runs the same FactoryTask flow on a GitLab Runner. The
+runner creates a temporary kind cluster, installs agent-sandbox, builds the
+coding image, reads the Issue through the GitLab API, and creates a merge
+request after successful validation.
 
-```bash
-FACTORY_IMAGE=registry.example.com/ai-factory/factory:latest \
-INSTALL_FACTORY_TASK_RUNTIME=true \
-GITHUB_TOKEN=... \
-GITLAB_TOKEN=... \
-WEBHOOK_SECRET=... \
-components/factory-task/install
-```
+Set AI_FACTORY_ISSUE_IID when a pipeline is started for an Issue. Set
+AI_FACTORY_SOURCE_URL when the target project consumes ai-factory from a
+separate GitLab mirror or repository. See docs/guide.md for protected
+variables, runner tags, webhook routing, and the required Docker privileges.
 
-This installs the watch controller, the GitHub/GitLab issue webhook service,
-RBAC, and optional provider credentials. See
-`components/factory-task/README.md` for runtime settings, optional Ingress,
-webhook endpoints, and sandbox git authentication.
+## Development
 
-We follow a **Spec-Driven Development** process for complex features, handled entirely by interacting agents:
-1. **Spec Generation:** The `speccer` agent generates specifications.
-2. **Planning:** The `planner` agent creates detailed implementation plans.
-3. **Execution:** The `builder` agent writes the code.
-4. **Review:** The `reviewer` agent automatically reviews and approves pull requests.
+Run the Go test suite:
 
-Agents are triggered by GitHub events (e.g., assigning issues, requesting reviews).
+    go test ./...
 
-## Contributing
+Validate shell scripts and YAML files before committing. Do not place API keys,
+provider tokens, generated prompts, or task instructions in commits.
 
-This project is licensed under the [Apache 2.0 License](LICENSE).
-
-**Note: We do not expect human contributions in this phase of the experiment.**
-
-We follow [Google's Open Source Community Guidelines](https://opensource.google.com/conduct/).
-
-## Disclaimer
-
-This is not an officially supported Google product.
-
-This project is not eligible for the Google Open Source Software Vulnerability Rewards Program.
+This project is licensed under the Apache 2.0 License. It is not an officially
+supported Google product.
