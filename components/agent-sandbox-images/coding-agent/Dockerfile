@@ -76,4 +76,3 @@ USER agent
 WORKDIR /workspace
 ENTRYPOINT ["/usr/local/bin/ai-factory-sandbox-entrypoint"]
 CMD ["sleep", "3600"]
-RUN echo "export PATH=/usr/local/go/bin:\${PATH}" > /etc/profile.d/go.sh && chmod +x /etc/profile.d/go.sh
