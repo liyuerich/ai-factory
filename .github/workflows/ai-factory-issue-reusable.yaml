@@ -1,6 +1,5 @@
 name: ai-factory issue runner
-
-on:
+true:
   workflow_call:
     inputs:
       repository:
@@ -30,12 +29,10 @@ on:
         required: false
       AI_FACTORY_GITHUB_TOKEN:
         required: false
-
 permissions:
   contents: write
   issues: write
   pull-requests: write
-
 jobs:
   run:
     runs-on: ubuntu-latest
@@ -50,16 +47,23 @@ jobs:
       VALIDATION_COMMAND: ${{ inputs.validation_command }}
       GH_TOKEN: ${{ github.token }}
       GITHUB_TOKEN: ${{ secrets.AI_FACTORY_GITHUB_TOKEN || github.token }}
-      AI_FACTORY_GITHUB_TOKEN: ${{ secrets.AI_FACTORY_GITHUB_TOKEN || github.token }}
+      AI_FACTORY_GITHUB_TOKEN: ${{ secrets.AI_FACTORY_GITHUB_TOKEN || github.token
+        }}
       OPENAI_API_KEY: ${{ secrets.AI_FACTORY_OPENAI_API_KEY }}
-      OPENAI_BASE_URL: ${{ vars.AI_FACTORY_OPENAI_BASE_URL || 'https://api.openai.com/v1' }}
+      OPENAI_BASE_URL: ${{ vars.AI_FACTORY_OPENAI_BASE_URL || 'https://api.openai.com/v1'
+        }}
       OPENAI_MODEL: ${{ vars.AI_FACTORY_OPENAI_MODEL || 'gpt-4.1' }}
       OPENAI_TEMPERATURE: ${{ vars.AI_FACTORY_OPENAI_TEMPERATURE || '1' }}
       OPENAI_MAX_TOKENS: ${{ vars.AI_FACTORY_OPENAI_MAX_TOKENS || '48000' }}
       OPENAI_MAX_TOOL_ROUNDS: ${{ vars.AI_FACTORY_OPENAI_MAX_TOOL_ROUNDS || '40' }}
-      OPENAI_MAX_FINAL_SCRIPT_ROUNDS: ${{ vars.AI_FACTORY_OPENAI_MAX_FINAL_SCRIPT_ROUNDS || '5' }}
-      OPENAI_MAX_REPAIR_ROUNDS: ${{ vars.AI_FACTORY_OPENAI_MAX_REPAIR_ROUNDS || '3' }}
+      OPENAI_MAX_FINAL_SCRIPT_ROUNDS: ${{ vars.AI_FACTORY_OPENAI_MAX_FINAL_SCRIPT_ROUNDS
+        || '5' }}
+      OPENAI_MAX_REPAIR_ROUNDS: ${{ vars.AI_FACTORY_OPENAI_MAX_REPAIR_ROUNDS || '3'
+        }}
     steps:
+    - name: Go runtime preflight
+      run: bash ./go-runtime-preflight.sh
+      shell: bash
     - name: Checkout target repository
       uses: actions/checkout@v4
       with:
@@ -67,148 +71,78 @@ jobs:
         ref: ${{ inputs.base_ref }}
         path: target
         token: ${{ secrets.AI_FACTORY_GITHUB_TOKEN || github.token }}
-
     - name: Checkout ai-factory
       uses: actions/checkout@v4
       with:
         repository: liyuerich/ai-factory
         ref: ${{ inputs.factory_ref }}
         path: factory
-
     - name: Set up Go
       uses: actions/setup-go@v5
       with:
         go-version-file: factory/go.mod
         cache-dependency-path: factory/go.sum
         cache: true
-
     - name: Create kind cluster
       uses: helm/kind-action@v1.12.0
       with:
         cluster_name: ${{ env.KIND_CLUSTER_NAME }}
-
     - name: Install FactoryTask and agent-sandbox
-      run: |
-        factory/components/factory-task/install
-        git clone --depth=1 https://github.com/kubernetes-sigs/agent-sandbox.git "$AGENT_SANDBOX_SRC"
-        IMAGE_PREFIX=ai-factory IMAGE_TAG=ci KIND_CLUSTER_NAME="$KIND_CLUSTER_NAME" \
-          AGENT_SANDBOX_SRC="$AGENT_SANDBOX_SRC" factory/components/agent-sandbox/install
-
+      run: "factory/components/factory-task/install\ngit clone --depth=1 https://github.com/kubernetes-sigs/agent-sandbox.git\
+        \ \"$AGENT_SANDBOX_SRC\"\nIMAGE_PREFIX=ai-factory IMAGE_TAG=ci KIND_CLUSTER_NAME=\"\
+        $KIND_CLUSTER_NAME\" \\\n  AGENT_SANDBOX_SRC=\"$AGENT_SANDBOX_SRC\" factory/components/agent-sandbox/install\n"
     - name: Build coding agent sandbox image
-      run: |
-        GO_VERSION="$(awk '/^go / {print $2; exit}' factory/go.mod)"
-        docker build --build-arg GO_VERSION="$GO_VERSION" \
-          -t "$CODING_AGENT_IMAGE" factory/components/agent-sandbox-images/coding-agent
-        kind load docker-image "$CODING_AGENT_IMAGE" --name "$KIND_CLUSTER_NAME"
-
+      run: "GO_VERSION=\"$(awk '/^go / {print $2; exit}' factory/go.mod)\"\ndocker\
+        \ build --build-arg GO_VERSION=\"$GO_VERSION\" \\\n  -t \"$CODING_AGENT_IMAGE\"\
+        \ factory/components/agent-sandbox-images/coding-agent\nkind load docker-image\
+        \ \"$CODING_AGENT_IMAGE\" --name \"$KIND_CLUSTER_NAME\"\n"
     - name: Create sandbox warm pool
-      run: |
-        cat > "$RUNNER_TEMP/go-dev-sandbox.yaml" <<EOF
-        apiVersion: extensions.agents.x-k8s.io/v1beta1
-        kind: SandboxTemplate
-        metadata:
-          name: go-dev
-          namespace: default
-        spec:
-          envVarsInjectionPolicy: Allowed
-          networkPolicyManagement: Unmanaged
-          podTemplate:
-            spec:
-              containers:
-              - name: dev
-                image: $CODING_AGENT_IMAGE
-                imagePullPolicy: IfNotPresent
-                command: ["/bin/bash", "-lc", "mkdir -p /workspace && sleep 3600"]
-                workingDir: /workspace
-        ---
-        apiVersion: extensions.agents.x-k8s.io/v1beta1
-        kind: SandboxWarmPool
-        metadata:
-          name: go-dev
-          namespace: default
-        spec:
-          replicas: 1
-          sandboxTemplateRef:
-            name: go-dev
-        EOF
-        kubectl apply -f "$RUNNER_TEMP/go-dev-sandbox.yaml"
-        kubectl wait sandboxwarmpool go-dev -n default \
-          --for=jsonpath='{.status.readyReplicas}'=1 --timeout=180s
-
+      run: "cat > \"$RUNNER_TEMP/go-dev-sandbox.yaml\" <<EOF\napiVersion: extensions.agents.x-k8s.io/v1beta1\n\
+        kind: SandboxTemplate\nmetadata:\n  name: go-dev\n  namespace: default\nspec:\n\
+        \  envVarsInjectionPolicy: Allowed\n  networkPolicyManagement: Unmanaged\n\
+        \  podTemplate:\n    spec:\n      containers:\n      - name: dev\n       \
+        \ image: $CODING_AGENT_IMAGE\n        imagePullPolicy: IfNotPresent\n    \
+        \    command: [\"/bin/bash\", \"-lc\", \"mkdir -p /workspace && sleep 3600\"\
+        ]\n        workingDir: /workspace\n---\napiVersion: extensions.agents.x-k8s.io/v1beta1\n\
+        kind: SandboxWarmPool\nmetadata:\n  name: go-dev\n  namespace: default\nspec:\n\
+        \  replicas: 1\n  sandboxTemplateRef:\n    name: go-dev\nEOF\nkubectl apply\
+        \ -f \"$RUNNER_TEMP/go-dev-sandbox.yaml\"\nkubectl wait sandboxwarmpool go-dev\
+        \ -n default \\\n  --for=jsonpath='{.status.readyReplicas}'=1 --timeout=180s\n"
     - name: Run FactoryTask
-      run: |
-        gh api "repos/$FACTORY_REPOSITORY/issues/$ISSUE_NUMBER" > "$RUNNER_TEMP/issue.json"
-        gh api "repos/$FACTORY_REPOSITORY" > "$RUNNER_TEMP/repository.json"
-        jq -n \
-          --slurpfile issue "$RUNNER_TEMP/issue.json" \
-          --slurpfile repository "$RUNNER_TEMP/repository.json" \
-          '{
-            action: "opened",
-            issue: $issue[0],
-            repository: {
-              full_name: $repository[0].full_name,
-              html_url: $repository[0].html_url,
-              clone_url: $repository[0].clone_url,
-              default_branch: $repository[0].default_branch
-            }
-          }' > "$RUNNER_TEMP/github-issue.json"
-
-        cd factory
-        go run ./factory/cmd/factory task webhook serve \
-          --addr 127.0.0.1:8080 \
-          --apply \
-          --repository "$FACTORY_REPOSITORY" \
-          --trigger-action opened \
-          --trigger-action reopened \
-          --trigger-action labeled \
-          --require-label ai-factory-run \
-          --sandbox-template go-dev \
-          --agent-command "$AGENT_COMMAND" \
-          --agent-env OPENAI_API_KEY \
-          --agent-env OPENAI_BASE_URL \
-          --agent-env OPENAI_MODEL \
-          --agent-env OPENAI_TEMPERATURE \
-          --agent-env OPENAI_MAX_TOKENS \
-          --agent-env OPENAI_MAX_TOOL_ROUNDS \
-          --agent-env OPENAI_MAX_FINAL_SCRIPT_ROUNDS \
-          --agent-env OPENAI_MAX_REPAIR_ROUNDS \
-          --command "$VALIDATION_COMMAND" \
-          --change-request=true \
-          --change-request-auth-token-env AI_FACTORY_GITHUB_TOKEN \
-          --reporting-mode comment \
-          > "$RUNNER_TEMP/webhook.log" 2>&1 &
-        WEBHOOK_PID=$!
-        trap 'kill "$WEBHOOK_PID" 2>/dev/null || true' EXIT
-
-        for _ in $(seq 1 30); do
-          if curl --fail --silent --show-error \
-            -X POST http://127.0.0.1:8080/webhook/github \
-            -H 'Content-Type: application/json' \
-            --data-binary @"$RUNNER_TEMP/github-issue.json"; then
-            break
-          fi
-          sleep 1
-        done
-
-        TASK_REPOSITORY="$(printf '%s' "$FACTORY_REPOSITORY" | tr '[:upper:]/_' '[:lower:]--')"
-        TASK_NAME="github-$TASK_REPOSITORY-$ISSUE_NUMBER"
-        kubectl get factorytask "$TASK_NAME" -n default -o yaml
-        go run ./factory/cmd/factory task controller watch \
-          --namespace default --once --interval=1s --timeout=180s \
-          --create-change-request=true --report=true
-
-        for _ in $(seq 1 90); do
-          phase="$(kubectl get factorytask "$TASK_NAME" -n default \
-            -o jsonpath='{.status.phase}' 2>/dev/null || true)"
-          if [[ "$phase" == "Succeeded" || "$phase" == "Failed" ]]; then
-            break
-          fi
-          sleep 2
-        done
-        kubectl get factorytask "$TASK_NAME" -n default -o yaml
-        [[ "$phase" == "Succeeded" ]]
-
+      run: "gh api \"repos/$FACTORY_REPOSITORY/issues/$ISSUE_NUMBER\" > \"$RUNNER_TEMP/issue.json\"\
+        \ngh api \"repos/$FACTORY_REPOSITORY\" > \"$RUNNER_TEMP/repository.json\"\n\
+        jq -n \\\n  --slurpfile issue \"$RUNNER_TEMP/issue.json\" \\\n  --slurpfile\
+        \ repository \"$RUNNER_TEMP/repository.json\" \\\n  '{\n    action: \"opened\"\
+        ,\n    issue: $issue[0],\n    repository: {\n      full_name: $repository[0].full_name,\n\
+        \      html_url: $repository[0].html_url,\n      clone_url: $repository[0].clone_url,\n\
+        \      default_branch: $repository[0].default_branch\n    }\n  }' > \"$RUNNER_TEMP/github-issue.json\"\
+        \n\ncd factory\ngo run ./factory/cmd/factory task webhook serve \\\n  --addr\
+        \ 127.0.0.1:8080 \\\n  --apply \\\n  --repository \"$FACTORY_REPOSITORY\"\
+        \ \\\n  --trigger-action opened \\\n  --trigger-action reopened \\\n  --trigger-action\
+        \ labeled \\\n  --require-label ai-factory-run \\\n  --sandbox-template go-dev\
+        \ \\\n  --agent-command \"$AGENT_COMMAND\" \\\n  --agent-env OPENAI_API_KEY\
+        \ \\\n  --agent-env OPENAI_BASE_URL \\\n  --agent-env OPENAI_MODEL \\\n  --agent-env\
+        \ OPENAI_TEMPERATURE \\\n  --agent-env OPENAI_MAX_TOKENS \\\n  --agent-env\
+        \ OPENAI_MAX_TOOL_ROUNDS \\\n  --agent-env OPENAI_MAX_FINAL_SCRIPT_ROUNDS\
+        \ \\\n  --agent-env OPENAI_MAX_REPAIR_ROUNDS \\\n  --command \"$VALIDATION_COMMAND\"\
+        \ \\\n  --change-request=true \\\n  --change-request-auth-token-env AI_FACTORY_GITHUB_TOKEN\
+        \ \\\n  --reporting-mode comment \\\n  > \"$RUNNER_TEMP/webhook.log\" 2>&1\
+        \ &\nWEBHOOK_PID=$!\ntrap 'kill \"$WEBHOOK_PID\" 2>/dev/null || true' EXIT\n\
+        \nfor _ in $(seq 1 30); do\n  if curl --fail --silent --show-error \\\n  \
+        \  -X POST http://127.0.0.1:8080/webhook/github \\\n    -H 'Content-Type:\
+        \ application/json' \\\n    --data-binary @\"$RUNNER_TEMP/github-issue.json\"\
+        ; then\n    break\n  fi\n  sleep 1\ndone\n\nTASK_REPOSITORY=\"$(printf '%s'\
+        \ \"$FACTORY_REPOSITORY\" | tr '[:upper:]/_' '[:lower:]--')\"\nTASK_NAME=\"\
+        github-$TASK_REPOSITORY-$ISSUE_NUMBER\"\nkubectl get factorytask \"$TASK_NAME\"\
+        \ -n default -o yaml\ngo run ./factory/cmd/factory task controller watch \\\
+        \n  --namespace default --once --interval=1s --timeout=180s \\\n  --create-change-request=true\
+        \ --report=true\n\nfor _ in $(seq 1 90); do\n  phase=\"$(kubectl get factorytask\
+        \ \"$TASK_NAME\" -n default \\\n    -o jsonpath='{.status.phase}' 2>/dev/null\
+        \ || true)\"\n  if [[ \"$phase\" == \"Succeeded\" || \"$phase\" == \"Failed\"\
+        \ ]]; then\n    break\n  fi\n  sleep 2\ndone\nkubectl get factorytask \"$TASK_NAME\"\
+        \ -n default -o yaml\n[[ \"$phase\" == \"Succeeded\" ]]\n"
     - name: Show FactoryTask status
       if: always()
-      run: |
-        kubectl get factorytasks,sandboxclaims,sandboxwarmpools,pods -A || true
+      run: 'kubectl get factorytasks,sandboxclaims,sandboxwarmpools,pods -A || true
+
+        '

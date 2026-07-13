@@ -16,4 +16,31 @@
 set -euo pipefail
 
 mkdir -p "${WORKSPACE:-/workspace}"
+
+EXPECTED_GO=/usr/local/go/bin/go
+
+preflight_fail() {
+  echo "coding-agent sandbox preflight failed: $1" >&2
+  echo "  PATH=${PATH}" >&2
+  echo "  expected_go=${EXPECTED_GO}" >&2
+  command -v go >&2 || true
+  exit 1
+}
+
+if [ ! -x "${EXPECTED_GO}" ]; then
+  preflight_fail "Go binary not found at ${EXPECTED_GO}"
+fi
+
+if ! GO_BIN="$(command -v go)"; then
+  preflight_fail "Go is not available in PATH"
+fi
+
+if [ "${GO_BIN}" != "${EXPECTED_GO}" ]; then
+  echo "coding-agent sandbox preflight warning: Go resolved to ${GO_BIN}, expected ${EXPECTED_GO}" >&2
+fi
+
+echo "coding-agent sandbox preflight: command -v go=${GO_BIN}"
+echo "coding-agent sandbox preflight: PATH=${PATH}"
+echo "coding-agent sandbox preflight: $(${GO_BIN} version)"
+
 exec "$@"

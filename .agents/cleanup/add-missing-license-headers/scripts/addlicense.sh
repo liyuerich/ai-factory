@@ -1,4 +1,6 @@
 #!/bin/bash
+export PATH=/usr/local/go/bin:${PATH}
+bash "$(dirname "$0")/go-runtime-preflight.sh" || exit 1
 # Copyright 2026 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
