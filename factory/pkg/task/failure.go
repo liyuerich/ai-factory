@@ -63,9 +63,10 @@ func ClassifyFailure(message string) FailureClassification {
 		strings.Contains(lower, "tool calls during all final script attempts"):
 		fc.Reason = ToolRoundsExhausted
 		fc.Friendly = "The agent used all available shell tool rounds before producing a final script."
-	case strings.Contains(lower, "empty repair script"):
+	case strings.Contains(lower, "empty repair script") ||
+		strings.Contains(lower, "empty repair response"):
 		fc.Reason = EmptyRepairScript
-		fc.Friendly = "The model returned an empty repair script after the generated script failed."
+		fc.Friendly = "The model returned an empty repair response after the generated script failed."
 	case strings.Contains(lower, "api request failed") ||
 		strings.Contains(lower, "unexpected eof") ||
 		strings.Contains(lower, "timed out"):
