@@ -45,6 +45,12 @@ func TestClassifyFailureRecognizesKnownReasons(t *testing.T) {
 			wantMsg: "empty repair script",
 		},
 		{
+			name:    "EmptyRepairResponseToolCalls",
+			message: "OpenAI-compatible model returned an empty repair response with tool calls",
+			want:    EmptyRepairScript,
+			wantMsg: "empty repair response",
+		},
+		{
 			name:    "ModelTimeout",
 			message: "api request failed: unexpected EOF while waiting for response",
 			want:    ModelTimeout,
