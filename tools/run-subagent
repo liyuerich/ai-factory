@@ -13,7 +13,7 @@ def main():
     agent_name = sys.argv[1]
     project_id = os.environ.get("GCP_PROJECT_ID", "my-project")
     agent_image = os.environ.get(
-        "AGENT_IMAGE", f"gcr.io/{project_id}/ai-on-gke-agent:latest"
+        "AGENT_IMAGE", f"gcr.io/{project_id}/ai-factory-agent:latest"
     )
     agent_command = os.environ.get(
         "AGENT_COMMAND", "ai-factory-agent openai-compatible"
