@@ -1,0 +1,446 @@
+# Copyright 2026 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+import json
+import os
+import re
+import stat
+import subprocess
+import sys
+import tempfile
+import time
+import urllib.error
+import urllib.request
+
+
+def required_env(name):
+    value = os.environ.get(name, "").strip()
+    if not value:
+        print(f"{name} is required for ai-factory-agent openai-compatible", file=sys.stderr)
+        sys.exit(2)
+    return value
+
+
+def strip_code_fence(text):
+    match = re.search(r"```(?:bash|sh|shell)?\s*(.*?)```", text, re.DOTALL | re.IGNORECASE)
+    if match:
+        return match.group(1).strip()
+    return text.strip()
+
+
+def truncate(value, limit=4000):
+    text = str(value)
+    if len(text) <= limit:
+        return text
+    return text[:limit] + f"... <truncated {len(text) - limit} chars>"
+
+
+def dump_response_diagnostics(payload):
+    print("OpenAI-compatible response diagnostics:", file=sys.stderr)
+    print(f"  id: {payload.get('id', '<missing>')}", file=sys.stderr)
+    print(f"  object: {payload.get('object', '<missing>')}", file=sys.stderr)
+    print(f"  model: {payload.get('model', '<missing>')}", file=sys.stderr)
+    print(f"  top-level keys: {sorted(payload.keys())}", file=sys.stderr)
+    choices = payload.get("choices")
+    if not isinstance(choices, list) or not choices:
+        print(f"  choices: {type(choices).__name__} {truncate(choices)}", file=sys.stderr)
+        return
+    choice = choices[0]
+    print(f"  choice[0] keys: {sorted(choice.keys())}", file=sys.stderr)
+    print(f"  choice[0].finish_reason: {choice.get('finish_reason', '<missing>')}", file=sys.stderr)
+    message = choice.get("message")
+    if not isinstance(message, dict):
+        print(f"  choice[0].message: {type(message).__name__} {truncate(message)}", file=sys.stderr)
+        return
+    print(f"  message keys: {sorted(message.keys())}", file=sys.stderr)
+    for key in ("role", "content", "reasoning_content", "tool_calls", "function_call", "refusal"):
+        if key in message:
+            value = message.get(key)
+            if isinstance(value, str):
+                print(f"  message.{key}: string len={len(value)} preview={truncate(value, 800)!r}", file=sys.stderr)
+            else:
+                print(f"  message.{key}: {type(value).__name__} {truncate(value, 1200)}", file=sys.stderr)
+    usage = payload.get("usage")
+    if usage is not None:
+        print(f"  usage: {truncate(usage, 1200)}", file=sys.stderr)
+
+
+def response_preview(payload):
+    try:
+        return truncate(json.dumps(payload, ensure_ascii=False, sort_keys=True), 4000)
+    except (TypeError, ValueError):
+        return truncate(payload, 4000)
+
+
+def post_chat_completion(request, base_url, api_key):
+    data = json.dumps(request).encode("utf-8")
+    for attempt in range(1, 4):
+        http_request = urllib.request.Request(
+            f"{base_url}/chat/completions",
+            data=data,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(http_request, timeout=300) as response:
+                response_body = response.read()
+                break
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace")
+            retryable = exc.code in (408, 409, 425, 429, 500, 502, 503, 504)
+            if retryable and attempt < 3:
+                print(f"OpenAI-compatible API request failed: HTTP {exc.code}; retrying ({attempt}/3)", file=sys.stderr)
+                time.sleep(2 * attempt)
+                continue
+            print(f"OpenAI-compatible API request failed: HTTP {exc.code}", file=sys.stderr)
+            print(detail, file=sys.stderr)
+            sys.exit(1)
+        except (urllib.error.URLError, TimeoutError, ConnectionError) as exc:
+            if attempt < 3:
+                print(f"OpenAI-compatible API request failed: {exc}; retrying ({attempt}/3)", file=sys.stderr)
+                time.sleep(2 * attempt)
+                continue
+            print(f"OpenAI-compatible API request failed: {exc}", file=sys.stderr)
+            sys.exit(1)
+
+    try:
+        return json.loads(response_body)
+    except json.JSONDecodeError as exc:
+        print(f"OpenAI-compatible API response was not valid JSON: {exc}", file=sys.stderr)
+        print(truncate(response_body.decode("utf-8", errors="replace")), file=sys.stderr)
+        sys.exit(1)
+
+
+def redact(text):
+    secret_names = (
+        "OPENAI_API_KEY",
+        "CODEX_API_KEY",
+        "GITHUB_TOKEN",
+        "GITLAB_TOKEN",
+        "AI_FACTORY_GITHUB_TOKEN",
+    )
+    redacted = str(text)
+    for name in secret_names:
+        value = os.environ.get(name)
+        if value:
+            redacted = redacted.replace(value, f"<redacted:{name}>")
+    return redacted
+
+
+def run_shell_tool(arguments):
+    try:
+        args = json.loads(arguments or "{}")
+    except json.JSONDecodeError as exc:
+        return f"invalid Shell tool arguments JSON: {exc}"
+    command = args.get("command", "")
+    if not isinstance(command, str) or not command.strip():
+        return "invalid Shell tool arguments: command must be a non-empty string"
+    print(f"--- TOOL: Shell {command}", file=sys.stderr)
+    try:
+        completed = subprocess.run(
+            ["/bin/bash", "-lc", command],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+    except subprocess.TimeoutExpired as exc:
+        output = (exc.stdout or "") + (exc.stderr or "")
+        return f"Shell tool timed out after 120s\n{truncate(redact(output), 12000)}"
+    output = [
+        f"exit_code={completed.returncode}",
+        "--- stdout ---",
+        completed.stdout,
+        "--- stderr ---",
+        completed.stderr,
+    ]
+    return truncate(redact("\n".join(output)), 12000)
+
+
+def run_tool_calls(tool_calls):
+    tool_messages = []
+    for tool_call in tool_calls:
+        function = tool_call.get("function") or {}
+        name = function.get("name")
+        arguments = function.get("arguments")
+        if name != "Shell":
+            content = f"unsupported tool: {name}"
+        else:
+            content = run_shell_tool(arguments)
+        tool_messages.append(
+            {
+                "role": "tool",
+                "tool_call_id": tool_call.get("id", ""),
+                "content": content,
+            }
+        )
+    return tool_messages
+
+
+def write_script(script):
+    with tempfile.NamedTemporaryFile("w", prefix="ai-factory-agent-", suffix=".sh", delete=False) as handle:
+        handle.write("#!/usr/bin/env bash\nset -euo pipefail\n")
+        handle.write(script)
+        handle.write("\n")
+        script_path = handle.name
+    os.chmod(script_path, os.stat(script_path).st_mode | stat.S_IXUSR)
+    return script_path
+
+
+def run_generated_script(script, model, label):
+    script_path = write_script(script)
+    print(f"--- RUN: OpenAI-compatible {label} script ({model})")
+    try:
+        completed = subprocess.run(
+            ["/bin/bash", script_path],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    finally:
+        try:
+            os.unlink(script_path)
+        except OSError:
+            pass
+    if completed.stdout:
+        print(redact(completed.stdout), end="")
+    if completed.stderr:
+        print(redact(completed.stderr), end="", file=sys.stderr)
+    return completed
+
+
+api_key = required_env("OPENAI_API_KEY")
+base_url = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
+model = os.environ.get("OPENAI_MODEL", "gpt-4.1")
+temperature = float(os.environ.get("OPENAI_TEMPERATURE", "1"))
+max_tokens = int(os.environ.get("OPENAI_MAX_TOKENS", "48000"))
+max_tool_rounds = int(os.environ.get("OPENAI_MAX_TOOL_ROUNDS", "40"))
+max_final_script_rounds = int(os.environ.get("OPENAI_MAX_FINAL_SCRIPT_ROUNDS", "5"))
+max_repair_rounds = int(os.environ.get("OPENAI_MAX_REPAIR_ROUNDS", "3"))
+with open(required_env("AI_FACTORY_PROMPT_FILE"), "r", encoding="utf-8") as prompt_handle:
+    prompt = prompt_handle.read()
+if not prompt.strip():
+    print("FactoryTask prompt on stdin is empty", file=sys.stderr)
+    sys.exit(2)
+
+system_prompt = """You are running inside an ai-factory sandbox.
+Return only a POSIX shell script. Do not wrap it in Markdown.
+Your response must start with a shell command or a shebang.
+Do not spend tokens explaining your plan. The generated shell script can inspect the repository at runtime with commands such as find, rg, sed, and test commands already used by this repository.
+The script must modify the checked-out repository to satisfy the task.
+Use small, focused edits. Prefer reading only directly relevant files. Avoid broad repository dumps unless the task is explicitly about repository-wide behavior.
+If the task is complex, make a compact implementation plan inside the shell script and execute it in small functions instead of asking for many exploratory tool calls.
+Run local checks when practical.
+Do not assume optional CLIs such as yq are installed. For YAML syntax checks, prefer python3 with the yaml module.
+Do not change go.mod or go.sum only to work around the local Go toolchain version; the sandbox is expected to provide the repository's declared Go version.
+Do not print secrets. Do not commit, push, or open pull requests.
+ai-factory will run validation, commit, push, and create the change request after you exit.
+"""
+messages = [
+    {"role": "system", "content": system_prompt},
+    {"role": "user", "content": prompt},
+]
+tools = [
+    {
+        "type": "function",
+        "function": {
+            "name": "Shell",
+            "description": "Run a shell command in the checked-out repository and return stdout, stderr, and exit code.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "command": {
+                        "type": "string",
+                        "description": "The shell command to run.",
+                    }
+                },
+                "required": ["command"],
+            },
+        },
+    }
+]
+
+content = ""
+payload = {}
+final_script_prompt_added = False
+for round_index in range(max_tool_rounds + max_final_script_rounds + 1):
+    final_script_round = round_index > max_tool_rounds
+    if final_script_round and not final_script_prompt_added:
+        messages.append(
+            {
+                "role": "user",
+                "content": (
+                    "You have reached the Shell tool limit. Do not call more tools. "
+                    "Return only the final POSIX shell script now."
+                ),
+            }
+        )
+        final_script_prompt_added = True
+    request = {
+        "model": model,
+        "messages": messages,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+    }
+    if final_script_round:
+        request["tool_choice"] = "none"
+    else:
+        request["tools"] = tools
+        request["tool_choice"] = "auto"
+    payload = post_chat_completion(request, base_url, api_key)
+
+    try:
+        choice = payload["choices"][0]
+        message = choice["message"]
+        content = message.get("content") or ""
+        tool_calls = message.get("tool_calls") or []
+    except (KeyError, IndexError, TypeError) as exc:
+        print(f"OpenAI-compatible API response did not contain choices[0].message.content: {exc}", file=sys.stderr)
+        dump_response_diagnostics(payload)
+        print(response_preview(payload), file=sys.stderr)
+        sys.exit(1)
+
+    dump_response_diagnostics(payload)
+    finish_reason = choice.get("finish_reason", "")
+    if not tool_calls and finish_reason == "length":
+        if round_index >= max_tool_rounds + max_final_script_rounds:
+            print("OpenAI-compatible model response was truncated during all final script attempts", file=sys.stderr)
+            print(response_preview(payload), file=sys.stderr)
+            sys.exit(1)
+        print("OpenAI-compatible model response was truncated; requesting a shorter final script", file=sys.stderr)
+        messages.append(
+            {
+                "role": "user",
+                "content": (
+                    "Your last response was truncated by the token limit. "
+                    "Do not include analysis or comments. Return a shorter POSIX shell script now. "
+                    "Prefer a compact script that writes small helper files and lets those helpers inspect the repository at runtime."
+                ),
+            }
+        )
+        continue
+    if tool_calls:
+        if final_script_round:
+            final_attempt = round_index - max_tool_rounds
+            if final_attempt >= max_final_script_rounds:
+                print(f"OpenAI-compatible model returned tool calls during all final script attempts ({max_final_script_rounds})", file=sys.stderr)
+                print(response_preview(payload), file=sys.stderr)
+                sys.exit(1)
+            attempted_tools = truncate(json.dumps(tool_calls, ensure_ascii=False), 2000)
+            print("OpenAI-compatible model returned tool calls during final script generation; retrying without tools", file=sys.stderr)
+            messages.append(
+                {
+                    "role": "user",
+                    "content": (
+                        "Your last response still tried to call tools, but no more tools are available. "
+                        "Do not call Shell. Use the information you already gathered and return only the final POSIX shell script. "
+                        f"Attempted tool calls: {attempted_tools}"
+                    ),
+                }
+            )
+            continue
+        if round_index >= max_tool_rounds:
+            print(f"OpenAI-compatible model reached max tool rounds ({max_tool_rounds}); requesting final script without tools", file=sys.stderr)
+            continue
+        messages.append(
+            {
+                "role": "assistant",
+                "content": content,
+                "tool_calls": tool_calls,
+            }
+        )
+        messages.extend(run_tool_calls(tool_calls))
+        continue
+    break
+
+script = strip_code_fence(content)
+if not script:
+    print("OpenAI-compatible model returned an empty script", file=sys.stderr)
+    print(response_preview(payload), file=sys.stderr)
+    sys.exit(1)
+
+completed = run_generated_script(script, model, "generated")
+for repair_index in range(max_repair_rounds):
+    if completed.returncode == 0:
+        break
+    failure_output = truncate(
+        redact(
+            "\n".join(
+                [
+                    f"exit_code={completed.returncode}",
+                    "--- stdout ---",
+                    completed.stdout or "",
+                    "--- stderr ---",
+                    completed.stderr or "",
+                ]
+            )
+        ),
+        12000,
+    )
+    print(f"OpenAI-compatible generated script failed; requesting repair script ({repair_index + 1}/{max_repair_rounds})", file=sys.stderr)
+    repair_messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": prompt},
+        {
+            "role": "user",
+            "content": (
+                "The shell script you generated failed when ai-factory executed it. "
+                "The repository is left in its current modified state. "
+                "Return only a concise POSIX shell script that repairs the current state and reruns the relevant checks. "
+                "Do not explain, do not use Markdown, do not commit, do not push.\n\n"
+                f"{failure_output}"
+            ),
+        },
+    ]
+    repair_payload = post_chat_completion(
+        {
+            "model": model,
+            "messages": repair_messages,
+            "tool_choice": "none",
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+        },
+        base_url,
+        api_key,
+    )
+    dump_response_diagnostics(repair_payload)
+    try:
+        repair_choice = repair_payload["choices"][0]
+        repair_message = repair_choice["message"]
+        content = repair_message.get("content") or ""
+        repair_finish_reason = repair_choice.get("finish_reason") or ""
+        repair_tool_calls = repair_message.get("tool_calls") or []
+        if repair_finish_reason == "length":
+            print("OpenAI-compatible repair script was truncated by the token limit", file=sys.stderr)
+            print(response_preview(repair_payload), file=sys.stderr)
+            sys.exit(1)
+        if repair_finish_reason == "tool_calls" or (repair_tool_calls and not content):
+            print("OpenAI-compatible model returned an empty repair response with tool calls", file=sys.stderr)
+            print(response_preview(repair_payload), file=sys.stderr)
+            sys.exit(1)
+    except (KeyError, IndexError, TypeError) as exc:
+        print(f"OpenAI-compatible repair response did not contain choices[0].message.content: {exc}", file=sys.stderr)
+        print(response_preview(repair_payload), file=sys.stderr)
+        sys.exit(1)
+    script = strip_code_fence(content)
+    if not script:
+        print("OpenAI-compatible model returned an empty repair script", file=sys.stderr)
+        print(response_preview(repair_payload), file=sys.stderr)
+        sys.exit(1)
+    completed = run_generated_script(script, model, f"repair {repair_index + 1}")
+
+sys.exit(completed.returncode)
