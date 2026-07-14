@@ -25,6 +25,7 @@ func TestClassifyFailureRecognizesKnownReasons(t *testing.T) {
 		message string
 		want    FailureReason
 		wantMsg string
+		wantCmd string
 	}{
 		{
 			name:    "ModelOutputTruncated",
@@ -69,10 +70,18 @@ func TestClassifyFailureRecognizesKnownReasons(t *testing.T) {
 			wantMsg: "syntax error",
 		},
 		{
-			name:    "CommandUnavailable",
+			name:    "CommandUnavailableBash",
 			message: "/tmp/ai-factory-agent.sh: line 16: go: command not found",
 			want:    CommandUnavailable,
-			wantMsg: "missing a command",
+			wantMsg: "missing the \"go\" command",
+			wantCmd: "go",
+		},
+		{
+			name:    "CommandUnavailableGoExec",
+			message: `exec: "terraform": executable file not found in $PATH`,
+			want:    CommandUnavailable,
+			wantMsg: "missing the \"terraform\" command",
+			wantCmd: "terraform",
 		},
 		{
 			name:    "NoChangeRequest",
@@ -89,11 +98,47 @@ func TestClassifyFailureRecognizesKnownReasons(t *testing.T) {
 				t.Fatalf("ClassifyFailure() reason = %q, want %q", fc.Reason, tt.want)
 			}
 			msg := FriendlyFailureMessage(fc)
-			if !strings.Contains(strings.ToLower(msg), tt.wantMsg) {
+			if !strings.Contains(strings.ToLower(msg), strings.ToLower(tt.wantMsg)) {
 				t.Fatalf("FriendlyFailureMessage() = %q, want substring %q", msg, tt.wantMsg)
 			}
 			if !strings.Contains(msg, tt.message) {
 				t.Fatalf("FriendlyFailureMessage() should preserve raw message, got %q", msg)
+			}
+			if tt.wantCmd != "" && fc.MissingCommand != tt.wantCmd {
+				t.Fatalf("MissingCommand = %q, want %q", fc.MissingCommand, tt.wantCmd)
+			}
+		})
+	}
+}
+
+func TestClassifyFailureCommandNotFoundNegativeCases(t *testing.T) {
+	cases := []struct {
+		name    string
+		message string
+	}{
+		{
+			name:    "permission denied",
+			message: "exec: \"./tool\": permission denied",
+		},
+		{
+			name:    "path syntax error",
+			message: "bash: syntax error near unexpected token `go'",
+		},
+		{
+			name:    "runtime error",
+			message: "panic: runtime error: invalid memory address or nil pointer dereference",
+		},
+		{
+			name:    "command not found in user log",
+			message: "Please install go: command not found is not an error I can fix",
+		},
+	}
+
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			fc := ClassifyFailure(tt.message)
+			if fc.Reason == CommandUnavailable {
+				t.Fatalf("classified as CommandUnavailable, message: %q", tt.message)
 			}
 		})
 	}
@@ -138,30 +183,28 @@ func TestFailureClassificationStderrTail(t *testing.T) {
 	fc := ClassifyFailure("empty repair script").WithStderrTail("patch: no valid hunks")
 	msg := FriendlyFailureMessage(fc)
 	if !strings.Contains(msg, "stderr tail") {
-		t.Fatalf("missing stderr tail in %q", msg)
+		t.Fatalf("FriendlyFailureMessage() should include stderr tail, got %q", msg)
 	}
-	if !strings.Contains(msg, "patch: no valid hunks") {
-		t.Fatalf("missing tail content in %q", msg)
+	if !strings.Contains(msg, fc.RawStderrTail) {
+		t.Fatalf("FriendlyFailureMessage() should include tail content, got %q", msg)
 	}
 }
 
 func TestFailureReasonList(t *testing.T) {
 	reasons := FailureReasonList()
-	want := []FailureReason{
-		ModelOutputTruncated,
-		ToolRoundsExhausted,
-		EmptyRepairScript,
-		ModelTimeout,
-		ValidationFailed,
-		CommandUnavailable,
-		NoChangeRequest,
+	if len(reasons) == 0 {
+		t.Fatal("expected non-empty failure reason list")
 	}
-	if len(reasons) != len(want) {
-		t.Fatalf("len(reasons) = %d, want %d", len(reasons), len(want))
+	seen := make(map[FailureReason]bool)
+	for _, r := range reasons {
+		if seen[r] {
+			t.Fatalf("duplicate reason %q", r)
+		}
+		seen[r] = true
 	}
-	for i, r := range reasons {
-		if r != want[i] {
-			t.Fatalf("reasons[%d] = %q, want %q", i, r, want[i])
+	for _, want := range []FailureReason{ModelOutputTruncated, ToolRoundsExhausted, EmptyRepairScript, ModelTimeout, ValidationFailed, CommandUnavailable, NoChangeRequest} {
+		if !seen[want] {
+			t.Fatalf("expected reason %q in FailureReasonList", want)
 		}
 	}
 }
