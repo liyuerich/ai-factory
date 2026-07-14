@@ -65,9 +65,10 @@ RUN if [ "${INSTALL_CODEX_CLI}" = "true" ]; then \
     && npm cache clean --force
 
 COPY ai-factory-agent /usr/local/bin/ai-factory-agent
+COPY ai-factory-agent.py /usr/local/bin/ai-factory-agent.py
 COPY entrypoint.sh /usr/local/bin/ai-factory-sandbox-entrypoint
 
-RUN chmod 755 /usr/local/bin/ai-factory-agent /usr/local/bin/ai-factory-sandbox-entrypoint \
+RUN chmod 755 /usr/local/bin/ai-factory-agent /usr/local/bin/ai-factory-agent.py /usr/local/bin/ai-factory-sandbox-entrypoint \
     && useradd --create-home --home-dir "${HOME}" --shell /bin/bash agent \
     && mkdir -p "${WORKSPACE}" \
     && chown -R agent:agent "${HOME}" "${WORKSPACE}"
