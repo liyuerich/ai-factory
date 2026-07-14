@@ -24,6 +24,11 @@ import urllib.error
 import urllib.request
 
 
+# Keep child Shell tools and generated scripts independent of the container
+# entrypoint and login-shell initialization.
+os.environ["PATH"] = f"/usr/local/go/bin:{os.environ.get('PATH', '')}"
+
+
 def required_env(name):
     value = os.environ.get(name, "").strip()
     if not value:

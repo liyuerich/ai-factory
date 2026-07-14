@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# SandboxTemplate commands may override the image entrypoint. Normalize the
+# toolchain path in the actual agent launcher so every child shell inherits it.
+export PATH="/usr/local/go/bin:${PATH:-}"
+
 usage() {
     cat >&2 <<'EOF'
 Usage:
