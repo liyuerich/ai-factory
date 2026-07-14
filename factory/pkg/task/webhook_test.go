@@ -149,6 +149,38 @@ func TestFactoryTaskFromGitHubIssueEscapedNewlines(t *testing.T) {
 	}
 }
 
+func TestNormalizeLiteralNewlines(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want string
+	}{
+		{
+			name: "escaped newlines",
+			body: `Goal\nDo the work.\n\nScope\n- Keep it small.`,
+			want: "Goal\nDo the work.\n\nScope\n- Keep it small.",
+		},
+		{
+			name: "already formatted",
+			body: "Goal\nDo the work.\n\nScope\n- Keep it small.",
+			want: "Goal\nDo the work.\n\nScope\n- Keep it small.",
+		},
+		{
+			name: "no escaped newlines",
+			body: "Do the work.",
+			want: "Do the work.",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := normalizeLiteralNewlines(tt.body); got != tt.want {
+				t.Fatalf("normalizeLiteralNewlines() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestFactoryTaskFromGitHubIssueWebhookIgnoredWithoutRequiredLabel(t *testing.T) {
 	_, err := FactoryTaskFromIssueWebhook([]byte(githubIssuePayload), IssueWebhookOptions{
 		Provider:           ProviderGitHub,
