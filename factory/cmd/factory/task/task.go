@@ -849,9 +849,9 @@ func executeTask(out io.Writer, task *taskpkg.FactoryTask, taskData []byte, appl
 		}
 	}
 	if err := patchTaskStatus(namespace, task.Metadata.Name, taskpkg.StatusPatchOptions{
-		Phase:            taskpkg.PhaseSucceeded,
-		Reason:           "PlanSucceeded",
-		Message:          "FactoryTask completed successfully",
+		Phase:            taskpkg.PhaseRunning,
+		Reason:           "PlanCompleted",
+		Message:          "FactoryTask plan completed; finalizing change request",
 		SandboxClaimName: claim,
 		SandboxName:      sandboxName,
 	}); err != nil {
@@ -859,16 +859,32 @@ func executeTask(out io.Writer, task *taskpkg.FactoryTask, taskData []byte, appl
 	}
 	resultMessage := "FactoryTask completed successfully"
 	changedFiles := collectChangedFiles(namespace, sandboxName, output.Plan.ContainerName)
-	resultURL, changeRequestAlreadyExists, err := createTaskChangeRequest(task, changeRequestEnabled(controllerName))
+	wantsChangeRequest := changeRequestEnabled(controllerName)
+	resultURL, changeRequestAlreadyExists, err := createTaskChangeRequest(task, wantsChangeRequest)
 	if err != nil {
+		failure := taskpkg.ClassifyFailure(err.Error())
 		_ = patchTaskStatus(namespace, task.Metadata.Name, taskpkg.StatusPatchOptions{
 			Phase:            taskpkg.PhaseFailed,
 			Reason:           "ChangeRequestCreateFailed",
 			Message:          err.Error(),
 			SandboxClaimName: claim,
 			SandboxName:      sandboxName,
+			FailureReason:    failure,
 		})
 		reportTaskResult(out, task, taskpkg.PhaseFailed, fmt.Sprintf("Change request creation failed: %v", err), reportingEnabled(controllerName))
+		return err
+	}
+	if err := validateChangeRequestResult(task, wantsChangeRequest, resultURL, changeRequestAlreadyExists); err != nil {
+		failure := taskpkg.ClassifyFailure(err.Error())
+		_ = patchTaskStatus(namespace, task.Metadata.Name, taskpkg.StatusPatchOptions{
+			Phase:            taskpkg.PhaseFailed,
+			Reason:           "NoChangeRequest",
+			Message:          err.Error(),
+			SandboxClaimName: claim,
+			SandboxName:      sandboxName,
+			FailureReason:    failure,
+		})
+		reportTaskResult(out, task, taskpkg.PhaseFailed, err.Error(), reportingEnabled(controllerName))
 		return err
 	}
 	if changeRequestAlreadyExists {
@@ -892,6 +908,16 @@ func executeTask(out io.Writer, task *taskpkg.FactoryTask, taskData []byte, appl
 			SandboxClaimName: claim,
 			SandboxName:      sandboxName,
 			LastResultURL:    resultURL,
+		}); err != nil {
+			return err
+		}
+	} else {
+		if err := patchTaskStatus(namespace, task.Metadata.Name, taskpkg.StatusPatchOptions{
+			Phase:            taskpkg.PhaseSucceeded,
+			Reason:           "PlanSucceeded",
+			Message:          "FactoryTask completed successfully",
+			SandboxClaimName: claim,
+			SandboxName:      sandboxName,
 		}); err != nil {
 			return err
 		}
@@ -930,7 +956,7 @@ func createTaskChangeRequest(task *taskpkg.FactoryTask, enabled bool) (string, b
 	result, err := taskpkg.CreateChangeRequest(context.Background(), task, taskpkg.ChangeRequestOptions{})
 	if err != nil {
 		if taskpkg.IsChangeRequestMissingBranch(err) {
-			return "", false, nil
+			return "", false, fmt.Errorf("no change request created: source branch missing: %w", err)
 		}
 		return "", false, err
 	}
@@ -938,6 +964,13 @@ func createTaskChangeRequest(task *taskpkg.FactoryTask, enabled bool) (string, b
 		return result.URL, true, nil
 	}
 	return result.URL, false, nil
+}
+
+func validateChangeRequestResult(task *taskpkg.FactoryTask, enabled bool, resultURL string, alreadyExists bool) error {
+	if !enabled || !task.Spec.ChangeRequest.Enabled || alreadyExists || strings.TrimSpace(resultURL) != "" {
+		return nil
+	}
+	return fmt.Errorf("no change request created: provider returned no change request URL")
 }
 
 func reportTaskResult(out io.Writer, task *taskpkg.FactoryTask, phase, message string, enabled bool) {

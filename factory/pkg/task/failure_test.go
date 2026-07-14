@@ -74,6 +74,12 @@ func TestClassifyFailureRecognizesKnownReasons(t *testing.T) {
 			want:    CommandUnavailable,
 			wantMsg: "missing a command",
 		},
+		{
+			name:    "NoChangeRequest",
+			message: "no change request created: source branch missing",
+			want:    NoChangeRequest,
+			wantMsg: "without creating a change request",
+		},
 	}
 
 	for _, tt := range tests {
@@ -114,6 +120,7 @@ func TestShouldRetryFailure(t *testing.T) {
 		{reason: ModelTimeout, want: true},
 		{reason: ValidationFailed, want: false},
 		{reason: CommandUnavailable, want: false},
+		{reason: NoChangeRequest, want: false},
 		{reason: "", want: false},
 	}
 
@@ -147,6 +154,7 @@ func TestFailureReasonList(t *testing.T) {
 		ModelTimeout,
 		ValidationFailed,
 		CommandUnavailable,
+		NoChangeRequest,
 	}
 	if len(reasons) != len(want) {
 		t.Fatalf("len(reasons) = %d, want %d", len(reasons), len(want))

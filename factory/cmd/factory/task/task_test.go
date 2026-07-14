@@ -213,6 +213,45 @@ func TestChangeRequestReportMessageListsChangedFiles(t *testing.T) {
 	}
 }
 
+func TestValidateChangeRequestResult(t *testing.T) {
+	task := &taskpkg.FactoryTask{
+		Spec: taskpkg.FactoryTaskSpec{
+			ChangeRequest: taskpkg.ChangeRequestSpec{Enabled: true},
+		},
+	}
+	tests := []struct {
+		name          string
+		enabled       bool
+		taskEnabled   bool
+		resultURL     string
+		alreadyExists bool
+		wantErr       bool
+	}{
+		{name: "missing result", enabled: true, taskEnabled: true, wantErr: true},
+		{name: "created result", enabled: true, taskEnabled: true, resultURL: "https://github.com/example/repo/pull/1"},
+		{name: "existing result", enabled: true, taskEnabled: true, alreadyExists: true},
+		{name: "change request disabled by controller", enabled: false, taskEnabled: true},
+		{name: "change request disabled by task", enabled: true, taskEnabled: false},
+	}
+	taskDisabled := *task
+	taskDisabled.Spec.ChangeRequest.Enabled = false
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			candidate := task
+			if !tt.taskEnabled {
+				candidate = &taskDisabled
+			}
+			err := validateChangeRequestResult(candidate, tt.enabled, tt.resultURL, tt.alreadyExists)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("validateChangeRequestResult() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if err != nil && !strings.Contains(err.Error(), "no change request created") {
+				t.Fatalf("error = %q, want no-change diagnostic", err)
+			}
+		})
+	}
+}
+
 func TestIssueWebhookHandlerIgnoresMissingRequiredLabel(t *testing.T) {
 	previousOptions := webhookOptions
 	previousServeOptions := webhookServeOptions

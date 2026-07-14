@@ -37,6 +37,9 @@ const (
 	ValidationFailed FailureReason = "ValidationFailed"
 	// CommandUnavailable means an expected tool was not available in the sandbox.
 	CommandUnavailable FailureReason = "CommandUnavailable"
+	// NoChangeRequest means the task expected a change request but no commit,
+	// branch update, or pull/merge request was created.
+	NoChangeRequest FailureReason = "NoChangeRequest"
 )
 
 // FailureClassification groups the stable reason and a user-friendly message
@@ -81,6 +84,11 @@ func ClassifyFailure(message string) FailureClassification {
 	case strings.Contains(lower, "command not found") || strings.Contains(lower, "executable file not found"):
 		fc.Reason = CommandUnavailable
 		fc.Friendly = "The sandbox is missing a command required by the generated script."
+	case strings.Contains(lower, "no changes to commit") ||
+		strings.Contains(lower, "no change branch push needed") ||
+		strings.Contains(lower, "no change request created"):
+		fc.Reason = NoChangeRequest
+		fc.Friendly = "The task completed without creating a change request."
 	}
 
 	return fc
@@ -125,5 +133,6 @@ func FailureReasonList() []FailureReason {
 		ModelTimeout,
 		ValidationFailed,
 		CommandUnavailable,
+		NoChangeRequest,
 	}
 }
