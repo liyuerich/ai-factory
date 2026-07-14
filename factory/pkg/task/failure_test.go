@@ -52,6 +52,12 @@ func TestClassifyFailureRecognizesKnownReasons(t *testing.T) {
 			wantMsg: "empty repair response",
 		},
 		{
+			name:    "InvalidGeneratedScript",
+			message: "OpenAI-compatible generated script validation failed: response contained explanatory prose instead of a shell script",
+			want:    InvalidGeneratedScript,
+			wantMsg: "non-executable or invalid shell content",
+		},
+		{
 			name:    "ModelTimeout",
 			message: "api request failed: unexpected EOF while waiting for response",
 			want:    ModelTimeout,
@@ -162,6 +168,7 @@ func TestShouldRetryFailure(t *testing.T) {
 		{reason: ModelOutputTruncated, want: true},
 		{reason: ToolRoundsExhausted, want: true},
 		{reason: EmptyRepairScript, want: true},
+		{reason: InvalidGeneratedScript, want: false},
 		{reason: ModelTimeout, want: true},
 		{reason: ValidationFailed, want: false},
 		{reason: CommandUnavailable, want: false},
@@ -202,7 +209,7 @@ func TestFailureReasonList(t *testing.T) {
 		}
 		seen[r] = true
 	}
-	for _, want := range []FailureReason{ModelOutputTruncated, ToolRoundsExhausted, EmptyRepairScript, ModelTimeout, ValidationFailed, CommandUnavailable, NoChangeRequest} {
+	for _, want := range []FailureReason{ModelOutputTruncated, ToolRoundsExhausted, EmptyRepairScript, InvalidGeneratedScript, ModelTimeout, ValidationFailed, CommandUnavailable, NoChangeRequest} {
 		if !seen[want] {
 			t.Fatalf("expected reason %q in FailureReasonList", want)
 		}

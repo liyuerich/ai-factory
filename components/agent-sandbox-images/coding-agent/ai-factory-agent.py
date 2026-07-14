@@ -14,7 +14,6 @@
 
 import json
 import os
-import re
 import stat
 import subprocess
 import sys
@@ -22,6 +21,8 @@ import tempfile
 import time
 import urllib.error
 import urllib.request
+
+from script_validation import SCRIPT_HEADER, ScriptValidationError, validate_shell_script
 
 
 # Keep child Shell tools and generated scripts independent of the container
@@ -35,13 +36,6 @@ def required_env(name):
         print(f"{name} is required for ai-factory-agent openai-compatible", file=sys.stderr)
         sys.exit(2)
     return value
-
-
-def strip_code_fence(text):
-    match = re.search(r"```(?:bash|sh|shell)?\s*(.*?)```", text, re.DOTALL | re.IGNORECASE)
-    if match:
-        return match.group(1).strip()
-    return text.strip()
 
 
 def truncate(value, limit=4000):
@@ -198,7 +192,7 @@ def run_tool_calls(tool_calls):
 
 def write_script(script):
     with tempfile.NamedTemporaryFile("w", prefix="ai-factory-agent-", suffix=".sh", delete=False) as handle:
-        handle.write("#!/usr/bin/env bash\nset -euo pipefail\n")
+        handle.write(SCRIPT_HEADER)
         handle.write(script)
         handle.write("\n")
         script_path = handle.name
@@ -207,6 +201,17 @@ def write_script(script):
 
 
 def run_generated_script(script, model, label):
+    try:
+        script = validate_shell_script(script)
+    except ScriptValidationError as exc:
+        message = f"OpenAI-compatible {label} script validation failed: {exc}"
+        print(message, file=sys.stderr)
+        return subprocess.CompletedProcess(
+            args=[],
+            returncode=1,
+            stdout="",
+            stderr=message + "\n",
+        )
     script_path = write_script(script)
     print(f"--- RUN: OpenAI-compatible {label} script ({model})")
     try:
@@ -372,8 +377,8 @@ for round_index in range(max_tool_rounds + max_final_script_rounds + 1):
         continue
     break
 
-script = strip_code_fence(content)
-if not script:
+script = content
+if not script.strip():
     print("OpenAI-compatible model returned an empty script", file=sys.stderr)
     print(response_preview(payload), file=sys.stderr)
     sys.exit(1)
@@ -441,8 +446,8 @@ for repair_index in range(max_repair_rounds):
         print(f"OpenAI-compatible repair response did not contain choices[0].message.content: {exc}", file=sys.stderr)
         print(response_preview(repair_payload), file=sys.stderr)
         sys.exit(1)
-    script = strip_code_fence(content)
-    if not script:
+    script = content
+    if not script.strip():
         print("OpenAI-compatible model returned an empty repair script", file=sys.stderr)
         print(response_preview(repair_payload), file=sys.stderr)
         sys.exit(1)

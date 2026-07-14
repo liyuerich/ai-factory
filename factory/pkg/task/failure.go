@@ -32,6 +32,9 @@ const (
 	// EmptyRepairScript means the model returned an empty repair script after
 	// a generated script failed.
 	EmptyRepairScript FailureReason = "EmptyRepairScript"
+	// InvalidGeneratedScript means the model returned prose, Markdown, or
+	// malformed shell content instead of an executable script.
+	InvalidGeneratedScript FailureReason = "InvalidGeneratedScript"
 	// ModelTimeout means the model API or network request timed out.
 	ModelTimeout FailureReason = "ModelTimeout"
 	// ValidationFailed means validation commands (e.g. go test) failed.
@@ -97,6 +100,9 @@ func ClassifyFailure(message string) FailureClassification {
 		strings.Contains(lower, "timed out"):
 		fc.Reason = ModelTimeout
 		fc.Friendly = "The model API or network request failed or timed out."
+	case strings.Contains(lower, "generated script validation failed"):
+		fc.Reason = InvalidGeneratedScript
+		fc.Friendly = "The model returned non-executable or invalid shell content."
 	case strings.Contains(lower, "go test") && (strings.Contains(lower, "fail") || strings.Contains(lower, "error")):
 		fc.Reason = ValidationFailed
 		fc.Friendly = "Validation failed while running Go tests."
@@ -153,6 +159,7 @@ func FailureReasonList() []FailureReason {
 		ModelOutputTruncated,
 		ToolRoundsExhausted,
 		EmptyRepairScript,
+		InvalidGeneratedScript,
 		ModelTimeout,
 		ValidationFailed,
 		CommandUnavailable,

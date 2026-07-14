@@ -18,6 +18,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 RUNTIME_LAUNCHER="${SCRIPT_DIR}/ai-factory-agent"
 PYTHON_AGENT="${SCRIPT_DIR}/ai-factory-agent.py"
+SCRIPT_VALIDATION="${SCRIPT_DIR}/script_validation.py"
 
 bash -n "${RUNTIME_LAUNCHER}"
 grep -Fq 'ai-factory-agent.py' "${RUNTIME_LAUNCHER}"
@@ -29,6 +30,16 @@ import sys
 path = Path(sys.argv[1])
 compile(path.read_text(encoding="utf-8"), str(path), "exec")
 PY
+
+python3 - "${SCRIPT_VALIDATION}" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+compile(path.read_text(encoding="utf-8"), str(path), "exec")
+PY
+
+PYTHONPATH="${SCRIPT_DIR}" python3 "${SCRIPT_DIR}/script_validation_test.py"
 
 bash "${RUNTIME_LAUNCHER}" --help >/dev/null
 echo "coding-agent runtime checks passed"
