@@ -16,6 +16,7 @@ package task
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 )
 
@@ -45,10 +46,31 @@ const (
 // FailureClassification groups the stable reason and a user-friendly message
 // with the original raw message preserved for debugging.
 type FailureClassification struct {
-	Reason        FailureReason
-	Friendly      string
-	RawMessage    string
-	RawStderrTail string
+	Reason         FailureReason
+	Friendly       string
+	RawMessage     string
+	RawStderrTail  string
+	MissingCommand string
+}
+
+// bashCommandNotFound matches shell "command not found" messages.
+// Example: /tmp/script.sh: line 16: go: command not found
+var bashCommandNotFound = regexp.MustCompile(`(?m)(?:^|\s)([^:]+):\s*line\s+\d+:\s+([^:]+):\s+command not found`)
+
+// goExecNotFound matches Go-style executable file not found errors.
+// Example: exec: "go": executable file not found in $PATH
+var goExecNotFound = regexp.MustCompile(`exec:\s*"([^"]+)":\s+executable file not found`)
+
+// detectMissingCommand returns the name of the missing command if the message
+// indicates a "command not found" or "executable file not found" failure.
+func detectMissingCommand(message string) string {
+	if m := bashCommandNotFound.FindStringSubmatch(message); len(m) > 2 && m[2] != "" {
+		return m[2]
+	}
+	if m := goExecNotFound.FindStringSubmatch(message); len(m) > 1 && m[1] != "" {
+		return m[1]
+	}
+	return ""
 }
 
 // ClassifyFailure inspects a raw failure message and returns a stable reason
@@ -81,9 +103,10 @@ func ClassifyFailure(message string) FailureClassification {
 	case strings.Contains(lower, "syntaxerror") || strings.Contains(lower, "syntax error"):
 		fc.Reason = ValidationFailed
 		fc.Friendly = "The generated script had a syntax error."
-	case strings.Contains(lower, "command not found") || strings.Contains(lower, "executable file not found"):
+	case detectMissingCommand(message) != "":
 		fc.Reason = CommandUnavailable
-		fc.Friendly = "The sandbox is missing a command required by the generated script."
+		fc.MissingCommand = detectMissingCommand(message)
+		fc.Friendly = fmt.Sprintf("The sandbox is missing the %q command required by the generated script.", fc.MissingCommand)
 	case strings.Contains(lower, "no changes to commit") ||
 		strings.Contains(lower, "no change branch push needed") ||
 		strings.Contains(lower, "no change request created"):
