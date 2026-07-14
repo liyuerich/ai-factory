@@ -1,5 +1,5 @@
 name: ai-factory issue runner
-true:
+on:
   workflow_call:
     inputs:
       repository:
