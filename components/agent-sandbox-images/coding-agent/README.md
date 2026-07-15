@@ -39,6 +39,15 @@ Provider configuration:
 Each model request is attempted at most twice. The shared total deadline caps
 all model retries, Shell calls, and generated or repair script execution.
 
+## Phase-aware diagnostics
+
+When the agent fails, the error context identifies the active phase as one of
+`tool-exploration`, `final-script`, or `repair-script`. This makes it easy to
+tell whether a timeout or error occurred while exploring available tools,
+generating the final script, or re-attempting a failed script. The shared total
+deadline (`OPENAI_TOTAL_TIMEOUT_SECONDS`) applies across all three phases, so
+a single Agent run cannot consume the entire CI job timeout.
+
 Other agent CLIs can be selected with AGENT_COMMAND or spec.agent.command.
 The image does not require or assume a particular model provider. The optional
 INSTALL_CODEX_CLI build argument installs the Codex CLI adapter, but the
