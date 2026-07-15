@@ -66,6 +66,7 @@ RUN if [ "${INSTALL_CODEX_CLI}" = "true" ]; then \
 
 COPY ai-factory-agent /usr/local/bin/ai-factory-agent
 COPY ai-factory-agent.py /usr/local/bin/ai-factory-agent.py
+COPY repair_prompt.py /usr/local/bin/repair_prompt.py
 COPY script_validation.py /usr/local/bin/script_validation.py
 COPY entrypoint.sh /usr/local/bin/ai-factory-sandbox-entrypoint
 

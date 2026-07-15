@@ -371,6 +371,27 @@ spec:
 	}
 }
 
+func TestRunAgentScriptIncludesProviderNeutralSandboxTools(t *testing.T) {
+	for _, agentCommand := range []string{
+		"ai-factory-agent openai-compatible",
+		"codex exec --full-auto",
+	} {
+		t.Run(agentCommand, func(t *testing.T) {
+			script := runAgentScript("/workspace/repo", "Fix the issue.", "", agentCommand)
+			for _, want := range []string{
+				"Sandbox tool constraints",
+				"Known development tools include git, go, make, node, npm, python3",
+				"there is no yaml or yq command",
+				"do not install packages during a repair",
+			} {
+				if !strings.Contains(script, want) {
+					t.Fatalf("agent script should include provider-neutral tool guidance %q", want)
+				}
+			}
+		})
+	}
+}
+
 func TestParseRejectsConflictingChangeRequestBranchFields(t *testing.T) {
 	_, err := Parse([]byte(`
 apiVersion: factory.ai.gke.io/v1alpha1

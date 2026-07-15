@@ -22,6 +22,7 @@ import time
 import urllib.error
 import urllib.request
 
+from repair_prompt import build_repair_prompt, format_failure_output
 from script_validation import (
     SCRIPT_HEADER,
     RepairResponseError,
@@ -393,19 +394,12 @@ completed = run_generated_script(script, model, "generated")
 for repair_index in range(max_repair_rounds):
     if completed.returncode == 0:
         break
-    failure_output = truncate(
-        redact(
-            "\n".join(
-                [
-                    f"exit_code={completed.returncode}",
-                    "--- stdout ---",
-                    completed.stdout or "",
-                    "--- stderr ---",
-                    completed.stderr or "",
-                ]
-            )
-        ),
-        12000,
+    failure_output = redact(
+        format_failure_output(
+            completed.returncode,
+            completed.stdout,
+            completed.stderr,
+        )
     )
     print(f"OpenAI-compatible generated script failed; requesting repair script ({repair_index + 1}/{max_repair_rounds})", file=sys.stderr)
     repair_messages = [
@@ -413,13 +407,7 @@ for repair_index in range(max_repair_rounds):
         {"role": "user", "content": prompt},
         {
             "role": "user",
-            "content": (
-                "The shell script you generated failed when ai-factory executed it. "
-                "The repository is left in its current modified state. "
-                "Return only a concise POSIX shell script that repairs the current state and reruns the relevant checks. "
-                "Do not explain, do not use Markdown, do not commit, do not push.\n\n"
-                f"{failure_output}"
-            ),
+            "content": build_repair_prompt(failure_output),
         },
     ]
     repair_payload = post_chat_completion(

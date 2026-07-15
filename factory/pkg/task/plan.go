@@ -237,6 +237,13 @@ Work in a plan-first, small-step style:
 - Run focused validation first, then the configured final validation command.
 - If the task is too large, implement the smallest useful slice and explain the remaining follow-up in comments or commit text.
 
+## Sandbox tool constraints
+
+- Known shell/core tools include bash, sh, awk, cat, cp, find, grep, head, mkdir, mv, rm, sed, sort, tail, tar, touch, tr, unzip, wc, and xargs.
+- Known development tools include git, go, make, node, npm, python3, pip3, rg, jq, and curl.
+- Python includes the PyYAML module (import yaml), but there is no yaml or yq command.
+- Do not assume commands outside this list are installed, and do not install packages during a repair. Rewrite the step with available tools instead.
+
 ## FactoryTask instructions
 
 EOF
