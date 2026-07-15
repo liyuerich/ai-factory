@@ -12,11 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import math
-import os
 import subprocess
 import sys
-import tempfile
 import unittest
 from pathlib import Path
 
@@ -115,29 +112,37 @@ class TestLoadConfig(unittest.TestCase):
                         load_config(self.base_env(**{name: invalid}))
                     self.assertIn(name, str(ctx.exception))
 
-    def test_kimi_defaults_are_valid(self):
-        # The issue acceptance criteria states that the current Kimi configuration
-        # passes offline validation. Simulate the publicly documented Moonshot
-        # Kimi OpenAI-compatible endpoint defaults.
+    def test_current_kimi_configuration_is_valid(self):
         config = load_config(
             self.base_env(
-                OPENAI_BASE_URL="https://api.moonshot.cn/v1",
-                OPENAI_MODEL="kimi-k2-072818",
-                OPENAI_TEMPERATURE="0.6",
-                OPENAI_MAX_TOKENS="8192",
-                OPENAI_MAX_TOOL_ROUNDS="20",
-                OPENAI_TOTAL_TIMEOUT_SECONDS="1200",
+                OPENAI_BASE_URL="https://api.kimi.com/coding/v1",
+                OPENAI_MODEL="kimi-for-coding",
+                OPENAI_TEMPERATURE="1",
+                OPENAI_MAX_TOKENS="32768",
+                OPENAI_MAX_TOOL_ROUNDS="32",
+                OPENAI_MAX_FINAL_SCRIPT_ROUNDS="3",
+                OPENAI_MAX_REPAIR_ROUNDS="3",
+                OPENAI_TOTAL_TIMEOUT_SECONDS="1800",
+                OPENAI_EXPLORATION_REQUEST_TIMEOUT_SECONDS="180",
+                OPENAI_FINAL_REQUEST_TIMEOUT_SECONDS="120",
+                OPENAI_REPAIR_REQUEST_TIMEOUT_SECONDS="180",
             )
         )
-        self.assertEqual(config.base_url, "https://api.moonshot.cn/v1")
-        self.assertEqual(config.model, "kimi-k2-072818")
+        self.assertEqual(config.base_url, "https://api.kimi.com/coding/v1")
+        self.assertEqual(config.model, "kimi-for-coding")
+        self.assertEqual(config.max_tokens, 32768)
+        self.assertEqual(config.max_tool_rounds, 32)
+        self.assertEqual(config.final_request_timeout_seconds, 120)
+        self.assertEqual(config.repair_request_timeout_seconds, 180)
 
 
 class TestCheckConfig(unittest.TestCase):
     def run_check(self, env):
+        child_env = {"PYTHONDONTWRITEBYTECODE": "1"}
+        child_env.update(env)
         return subprocess.run(
             [sys.executable, str(AGENT), "--check-config"],
-            env={k: v for k, v in env.items()},
+            env=child_env,
             capture_output=True,
             text=True,
         )

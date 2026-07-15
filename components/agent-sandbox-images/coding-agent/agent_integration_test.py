@@ -101,6 +101,8 @@ class AgentIntegrationTest(unittest.TestCase):
                     "OPENAI_API_KEY": "test-key",
                     "OPENAI_BASE_URL": f"http://127.0.0.1:{server.server_port}/v1",
                     "OPENAI_MODEL": "test-model",
+                    "OPENAI_TEMPERATURE": "1",
+                    "OPENAI_MAX_TOKENS": "48000",
                     "OPENAI_MAX_TOOL_ROUNDS": "2",
                     "OPENAI_MAX_FINAL_SCRIPT_ROUNDS": "2",
                     "OPENAI_MAX_REPAIR_ROUNDS": "0",

@@ -84,6 +84,10 @@ PYTHONPATH="${SCRIPT_DIR}" python3 "${SCRIPT_DIR}/repair_prompt_test.py"
 PYTHONPATH="${SCRIPT_DIR}" python3 "${SCRIPT_DIR}/repair_loop_test.py"
 
 bash "${RUNTIME_LAUNCHER}" --help >/dev/null
-bash "${RUNTIME_LAUNCHER}" openai-compatible --check-config \
+env -i \
+  PATH="${PATH}" \
+  PYTHONDONTWRITEBYTECODE=1 \
+  OPENAI_API_KEY=check-runtime-placeholder \
+  bash "${RUNTIME_LAUNCHER}" openai-compatible --check-config \
   || { echo "check-runtime: --check-config failed for default configuration" >&2; exit 1; }
 echo "coding-agent runtime checks passed"

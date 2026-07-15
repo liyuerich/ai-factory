@@ -3,6 +3,7 @@ kubeconfig
 
 # Local editor and OS files.
 .DS_Store
+*.bak
 *.swp
 
 # Python build artifacts.
