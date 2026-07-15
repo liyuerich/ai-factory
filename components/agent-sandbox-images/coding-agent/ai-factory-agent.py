@@ -26,6 +26,11 @@ from agent_budget import (
     post_chat_completion,
 )
 from repair_loop import RepairCandidate, RepairLoopTerminated, run_repair_loop
+from agent_config import (
+    AgentConfiguration,
+    InvalidAgentConfiguration,
+    load_config,
+)
 from script_validation import (
     SCRIPT_HEADER,
     RepairResponseError,
@@ -252,24 +257,28 @@ def run_generated_script(script, model, label, deadline):
     return completed
 
 
-api_key = required_env("OPENAI_API_KEY")
-base_url = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
-model = os.environ.get("OPENAI_MODEL", "gpt-4.1")
-temperature = float(os.environ.get("OPENAI_TEMPERATURE", "1"))
-max_tokens = int(os.environ.get("OPENAI_MAX_TOKENS", "48000"))
-max_tool_rounds = int(os.environ.get("OPENAI_MAX_TOOL_ROUNDS", "40"))
-max_final_script_rounds = int(os.environ.get("OPENAI_MAX_FINAL_SCRIPT_ROUNDS", "5"))
-max_repair_rounds = int(os.environ.get("OPENAI_MAX_REPAIR_ROUNDS", "3"))
-total_timeout_seconds = float(os.environ.get("OPENAI_TOTAL_TIMEOUT_SECONDS", "1800"))
-exploration_request_timeout_seconds = float(
-    os.environ.get("OPENAI_EXPLORATION_REQUEST_TIMEOUT_SECONDS", "180")
-)
-final_request_timeout_seconds = float(
-    os.environ.get("OPENAI_FINAL_REQUEST_TIMEOUT_SECONDS", "90")
-)
-repair_request_timeout_seconds = float(
-    os.environ.get("OPENAI_REPAIR_REQUEST_TIMEOUT_SECONDS", "90")
-)
+try:
+    config: AgentConfiguration = load_config()
+except InvalidAgentConfiguration as exc:
+    print(f"InvalidAgentConfiguration: {exc}", file=sys.stderr)
+    sys.exit(2)
+
+if "--check-config" in sys.argv:
+    print("OpenAI-compatible agent configuration is valid.", file=sys.stderr)
+    sys.exit(0)
+
+api_key = config.api_key
+base_url = config.base_url
+model = config.model
+temperature = config.temperature
+max_tokens = config.max_tokens
+max_tool_rounds = config.max_tool_rounds
+max_final_script_rounds = config.max_final_script_rounds
+max_repair_rounds = config.max_repair_rounds
+total_timeout_seconds = config.total_timeout_seconds
+exploration_request_timeout_seconds = config.exploration_request_timeout_seconds
+final_request_timeout_seconds = config.final_request_timeout_seconds
+repair_request_timeout_seconds = config.repair_request_timeout_seconds
 execution_deadline = ExecutionDeadline(total_timeout_seconds)
 with open(required_env("AI_FACTORY_PROMPT_FILE"), "r", encoding="utf-8") as prompt_handle:
     prompt = prompt_handle.read()

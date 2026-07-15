@@ -23,6 +23,16 @@ It reads the FactoryTask prompt from stdin, calls an OpenAI-compatible
 chat/completions endpoint, asks the selected model for a focused shell script,
 and executes that script in the checked-out repository.
 
+Offline configuration validation is available before any network request or
+Kubernetes setup:
+
+    ai-factory-agent openai-compatible --check-config
+
+The preflight validates the OpenAI-compatible configuration and exits
+successfully for valid settings or with status 2 and an `InvalidAgentConfiguration`
+message for invalid settings. It never reads a prompt, makes a network request,
+or executes a generated script, and it never prints the configured API key.
+
 Provider configuration:
 
 - OPENAI_API_KEY: required by the OpenAI-compatible runner.

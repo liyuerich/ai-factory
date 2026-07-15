@@ -66,6 +66,28 @@ jobs:
         go-version-file: go.mod
         cache: true
 
+    - name: OpenAI-compatible agent configuration preflight
+      if: contains(github.event.issue.labels.*.name, 'ai-factory') && contains(github.event.issue.labels.*.name, 'ai-factory-run')
+      env:
+        OPENAI_API_KEY: ${{ secrets.AI_FACTORY_OPENAI_API_KEY || secrets.OPENAI_API_KEY }}
+        OPENAI_BASE_URL: ${{ env.AI_FACTORY_OPENAI_BASE_URL }}
+        OPENAI_MODEL: ${{ env.AI_FACTORY_OPENAI_MODEL }}
+        OPENAI_TEMPERATURE: ${{ env.AI_FACTORY_OPENAI_TEMPERATURE }}
+        OPENAI_MAX_TOKENS: ${{ env.AI_FACTORY_OPENAI_MAX_TOKENS }}
+        OPENAI_MAX_TOOL_ROUNDS: ${{ env.AI_FACTORY_OPENAI_MAX_TOOL_ROUNDS }}
+        OPENAI_MAX_FINAL_SCRIPT_ROUNDS: ${{ env.AI_FACTORY_OPENAI_MAX_FINAL_SCRIPT_ROUNDS }}
+        OPENAI_MAX_REPAIR_ROUNDS: ${{ env.AI_FACTORY_OPENAI_MAX_REPAIR_ROUNDS }}
+        OPENAI_TOTAL_TIMEOUT_SECONDS: ${{ env.AI_FACTORY_OPENAI_TOTAL_TIMEOUT_SECONDS }}
+        OPENAI_EXPLORATION_REQUEST_TIMEOUT_SECONDS: ${{ env.AI_FACTORY_OPENAI_EXPLORATION_REQUEST_TIMEOUT_SECONDS }}
+        OPENAI_FINAL_REQUEST_TIMEOUT_SECONDS: ${{ env.AI_FACTORY_OPENAI_FINAL_REQUEST_TIMEOUT_SECONDS }}
+        OPENAI_REPAIR_REQUEST_TIMEOUT_SECONDS: ${{ env.AI_FACTORY_OPENAI_REPAIR_REQUEST_TIMEOUT_SECONDS }}
+      run: |
+        if [[ "${AI_FACTORY_RUN_AGENT_COMMAND}" != *"openai-compatible"* ]]; then
+          echo "Skipping OpenAI-compatible configuration preflight; agent command is not openai-compatible."
+          exit 0
+        fi
+        bash components/agent-sandbox-images/coding-agent/ai-factory-agent openai-compatible --check-config
+
     - name: Create kind cluster
       uses: helm/kind-action@v1.12.0
       with:
