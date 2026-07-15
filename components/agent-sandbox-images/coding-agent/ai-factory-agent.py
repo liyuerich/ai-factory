@@ -22,7 +22,13 @@ import time
 import urllib.error
 import urllib.request
 
-from script_validation import SCRIPT_HEADER, ScriptValidationError, validate_shell_script
+from script_validation import (
+    SCRIPT_HEADER,
+    RepairResponseError,
+    ScriptValidationError,
+    extract_repair_script,
+    validate_shell_script,
+)
 
 
 # Keep child Shell tools and generated scripts independent of the container
@@ -429,26 +435,9 @@ for repair_index in range(max_repair_rounds):
     )
     dump_response_diagnostics(repair_payload)
     try:
-        repair_choice = repair_payload["choices"][0]
-        repair_message = repair_choice["message"]
-        content = repair_message.get("content") or ""
-        repair_finish_reason = repair_choice.get("finish_reason") or ""
-        repair_tool_calls = repair_message.get("tool_calls") or []
-        if repair_finish_reason == "length":
-            print("OpenAI-compatible repair script was truncated by the token limit", file=sys.stderr)
-            print(response_preview(repair_payload), file=sys.stderr)
-            sys.exit(1)
-        if repair_finish_reason == "tool_calls" or (repair_tool_calls and not content):
-            print("OpenAI-compatible model returned an empty repair response with tool calls", file=sys.stderr)
-            print(response_preview(repair_payload), file=sys.stderr)
-            sys.exit(1)
-    except (KeyError, IndexError, TypeError) as exc:
-        print(f"OpenAI-compatible repair response did not contain choices[0].message.content: {exc}", file=sys.stderr)
-        print(response_preview(repair_payload), file=sys.stderr)
-        sys.exit(1)
-    script = content
-    if not script.strip():
-        print("OpenAI-compatible model returned an empty repair script", file=sys.stderr)
+        script = extract_repair_script(repair_payload)
+    except RepairResponseError as exc:
+        print(f"OpenAI-compatible {exc}", file=sys.stderr)
         print(response_preview(repair_payload), file=sys.stderr)
         sys.exit(1)
     completed = run_generated_script(script, model, f"repair {repair_index + 1}")

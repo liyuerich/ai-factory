@@ -18,6 +18,7 @@ This file contains notes and instructions for AI coding agents (like yourself) w
 * **Agent Sandbox:** We are using `agent-sandbox` (from `https://github.com/kubernetes-sigs/agent-sandbox`) installed via the `components/agent-sandbox/install` script. It installs the "extension" manifests (SandboxWarmPool, SandboxClaim, SandboxTemplate).
 * **Proxy E2E Tests:** In `factory/cmd/factory/runtime/proxy/proxy_e2e_test.go`, the custom upstream transport must set `transport.Proxy = nil` so host `http_proxy`/`https_proxy` env vars do not break local loopback e2e flows.
 * **FactoryTask Agent Runner:** When `spec.work.instructions` is non-empty, `factory/pkg/task.BuildExecutionPlan` adds a `run coding agent` step inside the cloned repository before validation commands. The step combines `spec.agent.promptRef` and the task instructions, then runs `spec.agent.command` or the default `ai-factory-agent openai-compatible`.
+* **Generated Script Validation:** The OpenAI-compatible coding agent rejects empty/prose/Markdown responses, validates Bash syntax (including unterminated heredocs), and compiles literal quoted Python heredocs before execution. Repair response extraction remains a pure, fixture-testable function so empty and `finish_reason=tool_calls` responses never reach script execution.
 
 * **Agent Runner Image:** The agent runner image is built from `images/ai-factory-agent/`. It is provider-neutral and runs in any Kubernetes cluster. The old `images/ai-on-gke-agent/` path was renamed in issue #39; update build references accordingly.
 

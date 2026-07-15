@@ -27,6 +27,10 @@ class ScriptValidationError(ValueError):
     """Raised when a model response is not safe executable shell content."""
 
 
+class RepairResponseError(ValueError):
+    """Raised when a model repair response does not contain a usable script."""
+
+
 _PROSE_PATTERNS = (
     re.compile(r"^no(?:\s+further)?\s+changes?\s+(?:are|were)?\s*(?:needed|required)\b", re.IGNORECASE),
     re.compile(r"^(?:the|this|these|those)\s+(?:implementation|change|task|work|code)\b", re.IGNORECASE),
@@ -40,6 +44,11 @@ _PROSE_PATTERNS = (
     re.compile(r"^(?:implementation|changes?|task|work)\s+(?:is|are|was|were)\s+(?:complete|done|finished)\b", re.IGNORECASE),
 )
 
+_PYTHON_HEREDOC = re.compile(
+    r"^\s*(?:command\s+)?(?:[^\s]+/)?python(?:3(?:\.\d+)?)?\b.*?"
+    r"(?P<operator><<-?)\s*(?P<quote>['\"])(?P<delimiter>[A-Za-z_][A-Za-z0-9_]*)"
+    r"(?P=quote)\s*$"
+)
 
 def _first_code_line(script):
     for line in script.splitlines():
@@ -159,6 +168,144 @@ def _truncate(value, limit=2000):
     return value[:limit] + f"... <truncated {len(value) - limit} chars>"
 
 
+def extract_repair_script(payload):
+    """Return script content from a repair response or raise a stable error."""
+    try:
+        choice = payload["choices"][0]
+        message = choice["message"]
+    except (KeyError, IndexError, TypeError) as exc:
+        raise RepairResponseError(
+            f"repair response did not contain choices[0].message: {exc}"
+        ) from exc
+
+    content = message.get("content") or ""
+    finish_reason = choice.get("finish_reason") or ""
+    tool_calls = message.get("tool_calls") or []
+    if finish_reason == "length":
+        raise RepairResponseError("repair script was truncated by the token limit")
+    if finish_reason == "tool_calls" or (tool_calls and not content):
+        raise RepairResponseError("model returned an empty repair response with tool calls")
+    if not content.strip():
+        raise RepairResponseError("model returned an empty repair script")
+    return content
+
+
+def _heredoc_declarations(line):
+    """Return (delimiter, strip_tabs) pairs for unquoted shell heredocs."""
+    declarations = []
+    index = 0
+    quote = None
+    while index < len(line):
+        char = line[index]
+        if quote:
+            if char == "\\" and quote == '"':
+                index += 2
+                continue
+            if char == quote:
+                quote = None
+            index += 1
+            continue
+        if char in ("'", '"'):
+            quote = char
+            index += 1
+            continue
+        if char == "\\":
+            index += 2
+            continue
+        if char == "#" and (index == 0 or line[index - 1].isspace()):
+            break
+        if not line.startswith("<<", index) or line.startswith("<<<", index):
+            index += 1
+            continue
+
+        cursor = index + 2
+        strip_tabs = cursor < len(line) and line[cursor] == "-"
+        if strip_tabs:
+            cursor += 1
+        while cursor < len(line) and line[cursor].isspace():
+            cursor += 1
+
+        delimiter_quote = line[cursor] if cursor < len(line) and line[cursor] in ("'", '"') else None
+        if delimiter_quote:
+            cursor += 1
+        delimiter_start = cursor
+        while cursor < len(line) and (line[cursor].isalnum() or line[cursor] == "_"):
+            cursor += 1
+        delimiter = line[delimiter_start:cursor]
+        if delimiter_quote:
+            if cursor >= len(line) or line[cursor] != delimiter_quote:
+                index += 2
+                continue
+            cursor += 1
+        if delimiter and (delimiter[0].isalpha() or delimiter[0] == "_"):
+            declarations.append((delimiter, strip_tabs))
+            index = cursor
+            continue
+        index += 2
+    return declarations
+
+
+def _validate_heredoc_terminators(script):
+    """Reject heredocs whose terminator is missing from the shell script."""
+    lines = script.splitlines()
+    index = 0
+    while index < len(lines):
+        declarations = _heredoc_declarations(lines[index])
+        if not declarations:
+            index += 1
+            continue
+
+        body_index = index + 1
+        for delimiter, strip_tabs in declarations:
+            while body_index < len(lines):
+                candidate = lines[body_index].lstrip("\t") if strip_tabs else lines[body_index]
+                if candidate == delimiter:
+                    break
+                body_index += 1
+            if body_index >= len(lines):
+                raise ScriptValidationError(
+                    f"shell syntax validation failed: unterminated heredoc {delimiter!r}"
+                )
+            body_index += 1
+        index = body_index
+
+
+def _validate_embedded_python_heredocs(script):
+    """Compile literal Python heredocs before the surrounding shell executes."""
+    lines = script.splitlines()
+    index = 0
+    while index < len(lines):
+        match = _PYTHON_HEREDOC.match(lines[index])
+        if not match:
+            index += 1
+            continue
+
+        delimiter = match.group("delimiter")
+        strip_tabs = match.group("operator") == "<<-"
+        body = []
+        index += 1
+        while index < len(lines):
+            candidate = lines[index].lstrip("\t") if strip_tabs else lines[index]
+            if candidate == delimiter:
+                break
+            body.append(lines[index].lstrip("\t") if strip_tabs else lines[index])
+            index += 1
+
+        # bash -n reports an unterminated heredoc. Leave that diagnostic to the
+        # shell validation path below instead of replacing it with a Python one.
+        if index >= len(lines):
+            return
+
+        try:
+            compile("\n".join(body) + "\n", "<generated Python heredoc>", "exec")
+        except SyntaxError as exc:
+            location = f"line {exc.lineno}" if exc.lineno else "unknown line"
+            raise ScriptValidationError(
+                f"embedded Python syntax validation failed at {location}: {exc.msg}"
+            ) from exc
+        index += 1
+
+
 def validate_shell_script(script):
     """Return script if it is executable shell content, otherwise raise."""
     script = (script or "").strip()
@@ -170,6 +317,8 @@ def validate_shell_script(script):
         raise ScriptValidationError("response contained explanatory prose instead of a shell script")
     if not _first_code_line(script):
         raise ScriptValidationError("response contained no executable shell content")
+
+    _validate_heredoc_terminators(script)
 
     script_path = None
     try:
@@ -194,7 +343,13 @@ def validate_shell_script(script):
             except OSError:
                 pass
 
-    if completed.returncode != 0:
+    shell_diagnostic = completed.stderr or completed.stdout or ""
+    unterminated_heredoc = (
+        "here-document at line" in shell_diagnostic
+        and "delimited by end-of-file" in shell_diagnostic
+    )
+    if completed.returncode != 0 or unterminated_heredoc:
         detail = _truncate(completed.stderr or completed.stdout or "shell syntax validation failed")
         raise ScriptValidationError(f"shell syntax validation failed: {detail}")
+    _validate_embedded_python_heredocs(script)
     return script

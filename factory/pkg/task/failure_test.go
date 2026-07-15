@@ -58,6 +58,30 @@ func TestClassifyFailureRecognizesKnownReasons(t *testing.T) {
 			wantMsg: "non-executable or invalid shell content",
 		},
 		{
+			name:    "InvalidGeneratedScriptTimeoutPrecedence",
+			message: "OpenAI-compatible generated script validation failed: shell syntax validation timed out",
+			want:    InvalidGeneratedScript,
+			wantMsg: "non-executable or invalid shell content",
+		},
+		{
+			name:    "UnterminatedPythonTripleQuotedString",
+			message: "embedded Python syntax validation failed: SyntaxError: unterminated triple-quoted string literal",
+			want:    InvalidGeneratedScript,
+			wantMsg: "non-executable or invalid shell content",
+		},
+		{
+			name:    "MalformedShellHeredoc",
+			message: "shell syntax validation failed: here-document delimited by end-of-file",
+			want:    InvalidGeneratedScript,
+			wantMsg: "non-executable or invalid shell content",
+		},
+		{
+			name:    "MarkdownFencedScript",
+			message: "generated script validation failed: Markdown code fences are not allowed",
+			want:    InvalidGeneratedScript,
+			wantMsg: "non-executable or invalid shell content",
+		},
+		{
 			name:    "ModelTimeout",
 			message: "api request failed: unexpected EOF while waiting for response",
 			want:    ModelTimeout,
@@ -88,6 +112,13 @@ func TestClassifyFailureRecognizesKnownReasons(t *testing.T) {
 			want:    CommandUnavailable,
 			wantMsg: "missing the \"terraform\" command",
 			wantCmd: "terraform",
+		},
+		{
+			name:    "CommandUnavailableYAML",
+			message: "/tmp/ai-factory-agent.sh: line 3: yaml: command not found",
+			want:    CommandUnavailable,
+			wantMsg: "missing the \"yaml\" command",
+			wantCmd: "yaml",
 		},
 		{
 			name:    "NoChangeRequest",

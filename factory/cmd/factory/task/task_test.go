@@ -252,6 +252,25 @@ func TestValidateChangeRequestResult(t *testing.T) {
 	}
 }
 
+func TestNoChangeTaskIsNotReportedAsSuccessful(t *testing.T) {
+	task := &taskpkg.FactoryTask{
+		Spec: taskpkg.FactoryTaskSpec{
+			ChangeRequest: taskpkg.ChangeRequestSpec{Enabled: true},
+		},
+	}
+	err := validateChangeRequestResult(task, true, "", false)
+	if err == nil {
+		t.Fatal("no-change task returned success, want failure")
+	}
+	failure := taskpkg.ClassifyFailure(err.Error())
+	if failure.Reason != taskpkg.NoChangeRequest {
+		t.Fatalf("failure reason = %q, want %q", failure.Reason, taskpkg.NoChangeRequest)
+	}
+	if !strings.Contains(taskpkg.FriendlyFailureMessage(failure), err.Error()) {
+		t.Fatal("no-change failure did not preserve the provider diagnostic")
+	}
+}
+
 func TestIssueWebhookHandlerIgnoresMissingRequiredLabel(t *testing.T) {
 	previousOptions := webhookOptions
 	previousServeOptions := webhookServeOptions

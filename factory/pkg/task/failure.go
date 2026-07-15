@@ -95,14 +95,18 @@ func ClassifyFailure(message string) FailureClassification {
 		strings.Contains(lower, "empty repair response"):
 		fc.Reason = EmptyRepairScript
 		fc.Friendly = "The model returned an empty repair response after the generated script failed."
+	case strings.Contains(lower, "generated script validation failed") ||
+		strings.Contains(lower, "shell syntax validation failed") ||
+		strings.Contains(lower, "embedded python syntax validation failed") ||
+		strings.Contains(lower, "unterminated triple-quoted string literal") ||
+		strings.Contains(lower, "markdown code fences are not allowed"):
+		fc.Reason = InvalidGeneratedScript
+		fc.Friendly = "The model returned non-executable or invalid shell content."
 	case strings.Contains(lower, "api request failed") ||
 		strings.Contains(lower, "unexpected eof") ||
 		strings.Contains(lower, "timed out"):
 		fc.Reason = ModelTimeout
 		fc.Friendly = "The model API or network request failed or timed out."
-	case strings.Contains(lower, "generated script validation failed"):
-		fc.Reason = InvalidGeneratedScript
-		fc.Friendly = "The model returned non-executable or invalid shell content."
 	case strings.Contains(lower, "go test") && (strings.Contains(lower, "fail") || strings.Contains(lower, "error")):
 		fc.Reason = ValidationFailed
 		fc.Friendly = "Validation failed while running Go tests."

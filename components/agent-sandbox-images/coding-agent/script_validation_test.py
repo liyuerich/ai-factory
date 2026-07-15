@@ -12,9 +12,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import tempfile
 import unittest
+from pathlib import Path
 
-from script_validation import ScriptValidationError, validate_shell_script
+from script_validation import (
+    RepairResponseError,
+    ScriptValidationError,
+    extract_repair_script,
+    validate_shell_script,
+)
 
 
 class ScriptValidationTest(unittest.TestCase):
@@ -37,6 +44,39 @@ class ScriptValidationTest(unittest.TestCase):
     def test_rejects_malformed_shell(self):
         self.assertInvalid("if true; then\n  printf '%s\\n' 'missing fi'", "syntax validation failed")
 
+    def test_rejects_unterminated_shell_heredoc(self):
+        self.assertInvalid("cat <<'EOF'\nmissing terminator", "syntax validation failed")
+
+    def test_rejects_unterminated_python_triple_quote(self):
+        script = "\n".join(
+            [
+                "python3 - <<'PY'",
+                'value = """unterminated',
+                "PY",
+            ]
+        )
+        self.assertInvalid(script, "embedded Python syntax validation failed")
+
+    def test_invalid_script_is_rejected_before_execution(self):
+        with tempfile.TemporaryDirectory() as directory:
+            marker = Path(directory) / "executed"
+            script = f"touch '{marker}'\nif true; then\n  echo missing-fi"
+            self.assertInvalid(script, "syntax validation failed")
+            self.assertFalse(marker.exists())
+
+    def test_accepts_literal_regex_in_quoted_shell_input(self):
+        script = r"printf '%s\n' '[\s\S]*?'"
+        self.assertEqual(validate_shell_script(script), script)
+
+    def test_accepts_heredoc_text_inside_quotes_and_comments(self):
+        script = "\n".join(
+            [
+                "# fixture example: cat <<'EOF'",
+                'printf \'%s\\n\' "cat <<EOF"',
+            ]
+        )
+        self.assertEqual(validate_shell_script(script), script)
+
     def test_accepts_valid_shell(self):
         script = "set -e\nprintf '%s\\n' 'valid'"
         self.assertEqual(validate_shell_script(script), script)
@@ -44,6 +84,37 @@ class ScriptValidationTest(unittest.TestCase):
     def test_accepts_shell_comments_before_command(self):
         script = "# explain the focused change\nprintf '%s\\n' 'valid'"
         self.assertEqual(validate_shell_script(script), script)
+
+    def test_extracts_repair_script(self):
+        payload = {
+            "choices": [
+                {
+                    "finish_reason": "stop",
+                    "message": {"content": "printf '%s\\n' repaired"},
+                }
+            ]
+        }
+        self.assertEqual(extract_repair_script(payload), "printf '%s\\n' repaired")
+
+    def test_rejects_empty_repair_response(self):
+        payload = {"choices": [{"finish_reason": "stop", "message": {"content": ""}}]}
+        with self.assertRaisesRegex(RepairResponseError, "empty repair script"):
+            extract_repair_script(payload)
+
+    def test_rejects_empty_repair_response_with_tool_calls(self):
+        payload = {
+            "choices": [
+                {
+                    "finish_reason": "tool_calls",
+                    "message": {
+                        "content": "",
+                        "tool_calls": [{"id": "call-1", "function": {"name": "Shell"}}],
+                    },
+                }
+            ]
+        }
+        with self.assertRaisesRegex(RepairResponseError, "empty repair response with tool calls"):
+            extract_repair_script(payload)
 
 
 if __name__ == "__main__":
