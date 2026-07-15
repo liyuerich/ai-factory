@@ -22,7 +22,7 @@ import time
 import urllib.error
 import urllib.request
 
-from repair_prompt import build_repair_prompt, format_failure_output
+from repair_loop import RepairCandidate, RepairLoopTerminated, run_repair_loop
 from script_validation import (
     SCRIPT_HEADER,
     RepairResponseError,
@@ -391,29 +391,22 @@ if not script.strip():
     sys.exit(1)
 
 completed = run_generated_script(script, model, "generated")
-for repair_index in range(max_repair_rounds):
-    if completed.returncode == 0:
-        break
-    failure_output = redact(
-        format_failure_output(
-            completed.returncode,
-            completed.stdout,
-            completed.stderr,
-        )
+
+
+def request_repair(round_number, round_limit, repair_prompt):
+    print(
+        "OpenAI-compatible generated script failed; requesting repair script "
+        f"({round_number}/{round_limit})",
+        file=sys.stderr,
     )
-    print(f"OpenAI-compatible generated script failed; requesting repair script ({repair_index + 1}/{max_repair_rounds})", file=sys.stderr)
-    repair_messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": prompt},
-        {
-            "role": "user",
-            "content": build_repair_prompt(failure_output),
-        },
-    ]
     repair_payload = post_chat_completion(
         {
             "model": model,
-            "messages": repair_messages,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": prompt},
+                {"role": "user", "content": repair_prompt},
+            ],
             "tool_choice": "none",
             "temperature": temperature,
             "max_tokens": max_tokens,
@@ -423,11 +416,26 @@ for repair_index in range(max_repair_rounds):
     )
     dump_response_diagnostics(repair_payload)
     try:
-        script = extract_repair_script(repair_payload)
+        repair_script = extract_repair_script(repair_payload)
     except RepairResponseError as exc:
-        print(f"OpenAI-compatible {exc}", file=sys.stderr)
-        print(response_preview(repair_payload), file=sys.stderr)
-        sys.exit(1)
-    completed = run_generated_script(script, model, f"repair {repair_index + 1}")
+        return RepairCandidate(
+            error=str(exc),
+            diagnostics=json.dumps(repair_payload, ensure_ascii=False, sort_keys=True),
+        )
+    return RepairCandidate(script=repair_script)
+
+
+try:
+    completed = run_repair_loop(
+        script,
+        completed,
+        max_repair_rounds,
+        request_repair,
+        lambda repair_script, label: run_generated_script(repair_script, model, label),
+        redact=redact,
+    )
+except RepairLoopTerminated as exc:
+    print(exc.diagnostics, file=sys.stderr)
+    sys.exit(exc.returncode)
 
 sys.exit(completed.returncode)

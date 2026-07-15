@@ -77,14 +77,17 @@ def format_failure_output(returncode, stdout="", stderr=""):
     )
 
 
-def build_repair_prompt(failure_output):
+def build_repair_prompt(failure_output, previous_script="", prior_attempts=""):
     """Build a repair request while preserving the complete redacted failure."""
     failure_output = str(failure_output or "")
+    previous_script = str(previous_script or "")
+    prior_attempts = str(prior_attempts or "")
     parts = [
         "The shell script you generated failed when ai-factory executed it.",
         "The repository is left in its current modified state.",
         "Return only a concise POSIX shell script that repairs the current state and reruns the relevant checks.",
         "Do not explain, do not use Markdown, do not commit, and do not push.",
+        "The response must start with a shell command or a shebang and must not contain tool calls.",
     ]
 
     missing_command = detect_missing_command(failure_output)
@@ -99,6 +102,28 @@ def build_repair_prompt(failure_output):
                 f"- Recommended alternative: {recommended_alternative(missing_command)}",
                 "",
                 SANDBOX_TOOL_GUIDANCE,
+            ]
+        )
+
+    if previous_script:
+        parts.extend(
+            [
+                "",
+                "Previous failed script (do not return this script unchanged):",
+                "--- previous script start ---",
+                previous_script,
+                "--- previous script end ---",
+            ]
+        )
+
+    if prior_attempts:
+        parts.extend(
+            [
+                "",
+                "Earlier repair history (do not repeat these scripts or invalid formats):",
+                "--- repair history start ---",
+                prior_attempts,
+                "--- repair history end ---",
             ]
         )
 

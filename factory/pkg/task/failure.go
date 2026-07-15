@@ -32,6 +32,15 @@ const (
 	// EmptyRepairScript means the model returned an empty repair script after
 	// a generated script failed.
 	EmptyRepairScript FailureReason = "EmptyRepairScript"
+	// RepeatedInvalidRepairScript means the model repeated a script that
+	// already failed, so the agent stopped before executing it again.
+	RepeatedInvalidRepairScript FailureReason = "RepeatedInvalidRepairScript"
+	// RepeatedInvalidRepairResponseFormat means the model repeatedly returned
+	// an invalid repair response instead of an executable script.
+	RepeatedInvalidRepairResponseFormat FailureReason = "RepeatedInvalidRepairResponseFormat"
+	// RepairRoundsExhausted means no repair succeeded within the configured
+	// maximum number of repair rounds.
+	RepairRoundsExhausted FailureReason = "RepairRoundsExhausted"
 	// InvalidGeneratedScript means the model returned prose, Markdown, or
 	// malformed shell content instead of an executable script.
 	InvalidGeneratedScript FailureReason = "InvalidGeneratedScript"
@@ -95,6 +104,15 @@ func ClassifyFailure(message string) FailureClassification {
 		strings.Contains(lower, "empty repair response"):
 		fc.Reason = EmptyRepairScript
 		fc.Friendly = "The model returned an empty repair response after the generated script failed."
+	case strings.Contains(lower, "repeatedinvalidrepairscript"):
+		fc.Reason = RepeatedInvalidRepairScript
+		fc.Friendly = "The model repeated a previously failed repair script, so the agent stopped before executing it again."
+	case strings.Contains(lower, "repeatedinvalidrepairresponseformat"):
+		fc.Reason = RepeatedInvalidRepairResponseFormat
+		fc.Friendly = "The model repeatedly returned the same invalid repair response format."
+	case strings.Contains(lower, "repairroundsexhausted"):
+		fc.Reason = RepairRoundsExhausted
+		fc.Friendly = "No generated repair succeeded within the configured repair-round limit."
 	case strings.Contains(lower, "generated script validation failed") ||
 		strings.Contains(lower, "shell syntax validation failed") ||
 		strings.Contains(lower, "embedded python syntax validation failed") ||
@@ -163,6 +181,9 @@ func FailureReasonList() []FailureReason {
 		ModelOutputTruncated,
 		ToolRoundsExhausted,
 		EmptyRepairScript,
+		RepeatedInvalidRepairScript,
+		RepeatedInvalidRepairResponseFormat,
+		RepairRoundsExhausted,
 		InvalidGeneratedScript,
 		ModelTimeout,
 		ValidationFailed,

@@ -79,6 +79,23 @@ class RepairPromptTest(unittest.TestCase):
         self.assertNotIn("openai", prompt.lower())
         self.assertNotIn("codex", prompt.lower())
 
+    def test_prompt_includes_previous_script_and_prior_diagnostics(self):
+        previous_script = "printf '%s\\n' previous"
+        prior_attempts = "round 1 returned an empty repair script"
+        failure_output = "exit_code=1\n--- stderr ---\nfocused failure"
+
+        prompt = build_repair_prompt(
+            failure_output,
+            previous_script=previous_script,
+            prior_attempts=prior_attempts,
+        )
+
+        self.assertIn(previous_script, prompt)
+        self.assertIn(prior_attempts, prompt)
+        self.assertIn(failure_output, prompt)
+        self.assertIn("must start with a shell command or a shebang", prompt)
+        self.assertIn("must not contain tool calls", prompt)
+
 
 if __name__ == "__main__":
     unittest.main()

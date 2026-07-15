@@ -14,10 +14,12 @@
 # limitations under the License.
 
 set -euo pipefail
+export PYTHONDONTWRITEBYTECODE=1
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 RUNTIME_LAUNCHER="${SCRIPT_DIR}/ai-factory-agent"
 PYTHON_AGENT="${SCRIPT_DIR}/ai-factory-agent.py"
+REPAIR_LOOP="${SCRIPT_DIR}/repair_loop.py"
 REPAIR_PROMPT="${SCRIPT_DIR}/repair_prompt.py"
 SCRIPT_VALIDATION="${SCRIPT_DIR}/script_validation.py"
 
@@ -40,6 +42,14 @@ path = Path(sys.argv[1])
 compile(path.read_text(encoding="utf-8"), str(path), "exec")
 PY
 
+python3 - "${REPAIR_LOOP}" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+compile(path.read_text(encoding="utf-8"), str(path), "exec")
+PY
+
 python3 - "${REPAIR_PROMPT}" <<'PY'
 from pathlib import Path
 import sys
@@ -50,6 +60,7 @@ PY
 
 PYTHONPATH="${SCRIPT_DIR}" python3 "${SCRIPT_DIR}/script_validation_test.py"
 PYTHONPATH="${SCRIPT_DIR}" python3 "${SCRIPT_DIR}/repair_prompt_test.py"
+PYTHONPATH="${SCRIPT_DIR}" python3 "${SCRIPT_DIR}/repair_loop_test.py"
 
 bash "${RUNTIME_LAUNCHER}" --help >/dev/null
 echo "coding-agent runtime checks passed"
