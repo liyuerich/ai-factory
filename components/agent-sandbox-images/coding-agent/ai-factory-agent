@@ -25,12 +25,15 @@ PYTHON_AGENT="${SCRIPT_DIR}/ai-factory-agent.py"
 usage() {
     cat >&2 <<'EOF'
 Usage:
-  ai-factory-agent openai-compatible
+  ai-factory-agent openai-compatible [--check-config]
   ai-factory-agent codex [args...]
   ai-factory-agent --help
 
 OpenAI-compatible mode reads the FactoryTask prompt from stdin and executes a
 model-generated shell script in the current repository.
+
+  --check-config   Validate the OpenAI-compatible configuration offline and
+                   exit without reading a prompt or making a network request.
 
 Required environment:
   OPENAI_API_KEY
@@ -51,13 +54,26 @@ EOF
 }
 
 run_openai_compatible() {
-    prompt_file="$(mktemp)"
-    trap 'rm -f "${prompt_file}"' RETURN
-    cat > "${prompt_file}"
+    local check_config=false
+    for arg in "$@"; do
+        if [[ "$arg" == "--check-config" ]]; then
+            check_config=true
+        fi
+    done
+
     if [[ ! -f "${PYTHON_AGENT}" ]]; then
         echo "ai-factory-agent.py is required beside the runtime launcher" >&2
         return 1
     fi
+
+    if [[ "${check_config}" == "true" ]]; then
+        python3 "${PYTHON_AGENT}" --check-config
+        return $?
+    fi
+
+    prompt_file="$(mktemp)"
+    trap 'rm -f "${prompt_file}"' RETURN
+    cat > "${prompt_file}"
     AI_FACTORY_PROMPT_FILE="${prompt_file}" python3 "${PYTHON_AGENT}" "$@"
 }
 
