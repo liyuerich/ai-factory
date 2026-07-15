@@ -203,7 +203,7 @@ func changeRequestDefaults(task *FactoryTask) (string, string, string, string, s
 }
 
 func commitChangesScript(workDir, commitMessage, authorName, authorEmail string) string {
-	return fmt.Sprintf("cd %s && rm -f .ai-factory/agent-prompt.md .ai-factory/task-instructions.md && git add -A && if git diff --cached --quiet; then echo 'No changes to commit'; else git -c user.name=%s -c user.email=%s commit -m %s; fi", shellQuote(workDir), shellQuote(authorName), shellQuote(authorEmail), shellQuote(commitMessage))
+	return fmt.Sprintf("cd %s && rm -f .ai-factory/agent-prompt.md .ai-factory/task-instructions.md && find . -type d -name '__pycache__' -prune -exec rm -rf {} + && find . -type f \\( -name '*.pyc' -o -name '*.pyo' \\) -delete && git add -A && if git diff --cached --quiet; then echo 'No changes to commit'; else git -c user.name=%s -c user.email=%s commit -m %s; fi", shellQuote(workDir), shellQuote(authorName), shellQuote(authorEmail), shellQuote(commitMessage))
 }
 
 func pushChangeBranchScript(workDir, remoteName, branchName, targetBranch string) string {
@@ -235,6 +235,8 @@ Work in a plan-first, small-step style:
 - Avoid broad repository scans unless the task truly requires them.
 - Keep generated shell scripts short and deterministic.
 - Run focused validation first, then the configured final validation command.
+- Changes made through Shell tools persist in the checkout. Once implementation and focused checks pass, stop exploring and return the required final response.
+- Generated scripts run with the repository root as the current directory but may be stored under /tmp. Use pwd or git rev-parse --show-toplevel, never dirname "$0", to locate the repository.
 - If the task is too large, implement the smallest useful slice and explain the remaining follow-up in comments or commit text.
 
 ## Sandbox tool constraints
@@ -242,6 +244,7 @@ Work in a plan-first, small-step style:
 - Known shell/core tools include bash, sh, awk, cat, cp, find, grep, head, mkdir, mv, rm, sed, sort, tail, tar, touch, tr, unzip, wc, and xargs.
 - Known development tools include git, go, make, node, npm, python3, pip3, rg, jq, and curl.
 - Python includes the PyYAML module (import yaml), but there is no yaml or yq command.
+- Do not run python3 -m py_compile or compileall because they leave __pycache__ or .pyc build artifacts. Use compile(source, filename, "exec") or repository tests instead.
 - Do not assume commands outside this list are installed, and do not install packages during a repair. Rewrite the step with available tools instead.
 
 ## FactoryTask instructions

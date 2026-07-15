@@ -133,6 +133,30 @@ class AgentIntegrationTest(unittest.TestCase):
         self.assertEqual(len(server.requests), 1)
         self.assertEqual(server.requests[0]["tool_choice"], "auto")
 
+    def test_standalone_bash_fence_is_unwrapped_and_runs_from_repo_root(self):
+        script = "\n".join(
+            [
+                "```bash",
+                'test "$(pwd)" != "$(cd -- "$(dirname -- "$0")" && pwd)"',
+                "printf 'fenced-success\\n'",
+                "```",
+            ]
+        )
+        with completion_server([completion(script)]) as server:
+            completed = self.run_agent(server)
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn("fenced-success", completed.stdout)
+
+    def test_fence_with_surrounding_prose_is_not_executed(self):
+        response = "Here is the script:\n```bash\nprintf unsafe\n```"
+        with completion_server([completion(response)]) as server:
+            completed = self.run_agent(server)
+
+        self.assertEqual(completed.returncode, 1)
+        self.assertIn("one standalone bash, sh, or shell block", completed.stderr)
+        self.assertNotIn("unsafe", completed.stdout)
+
     def test_tool_limit_switches_to_bounded_final_phase(self):
         tool_calls = [
             {

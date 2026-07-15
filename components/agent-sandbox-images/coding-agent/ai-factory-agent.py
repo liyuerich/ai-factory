@@ -31,6 +31,7 @@ from script_validation import (
     RepairResponseError,
     ScriptValidationError,
     extract_repair_script,
+    normalize_model_script,
     validate_shell_script,
 )
 
@@ -189,6 +190,7 @@ def write_script(script):
 
 def run_generated_script(script, model, label, deadline):
     try:
+        script = normalize_model_script(script)
         script = validate_shell_script(script)
     except ScriptValidationError as exc:
         message = f"OpenAI-compatible {label} script validation failed: {exc}"
@@ -279,10 +281,12 @@ system_prompt = """You are running inside an ai-factory sandbox.
 Return only a POSIX shell script. Do not wrap it in Markdown.
 Your response must start with a shell command or a shebang.
 Do not spend tokens explaining your plan. The generated shell script can inspect the repository at runtime with commands such as find, rg, sed, and test commands already used by this repository.
-The script must modify the checked-out repository to satisfy the task.
+Shell tool changes persist in the same checkout. If tool calls already completed the implementation, stop calling tools and return a concise script that validates the existing changes. Otherwise, the final script must modify the checked-out repository to satisfy the task.
+Generated scripts are stored at a temporary path outside the repository but run with the repository root as their current working directory. Use `pwd` or `git rev-parse --show-toplevel`; never derive the repository root from `dirname "$0"`.
 Use small, focused edits. Prefer reading only directly relevant files. Avoid broad repository dumps unless the task is explicitly about repository-wide behavior.
 If the task is complex, make a compact implementation plan inside the shell script and execute it in small functions instead of asking for many exploratory tool calls.
 Run local checks when practical.
+Do not run `python3 -m py_compile` or `compileall`, because they leave bytecode build artifacts in the repository. Use `compile(source, filename, "exec")` or the repository's tests instead.
 Do not assume optional CLIs such as yq are installed. For YAML syntax checks, prefer python3 with the yaml module.
 Do not change go.mod or go.sum only to work around the local Go toolchain version; the sandbox is expected to provide the repository's declared Go version.
 Do not print secrets. Do not commit, push, or open pull requests.
@@ -444,7 +448,10 @@ if not script:
             "role": "user",
             "content": (
                 "Tool exploration is finished. Do not call more tools. "
-                "Return only the final POSIX shell script now."
+                "Changes already made by Shell tools persist. Return only a "
+                "concise final POSIX shell script now, without Markdown. The "
+                "script runs from the repository root but is stored under a "
+                "temporary path, so do not locate the repository from $0."
             ),
         }
     )

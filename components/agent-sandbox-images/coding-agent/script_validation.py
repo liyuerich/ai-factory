@@ -50,6 +50,11 @@ _PYTHON_HEREDOC = re.compile(
     r"(?P=quote)\s*$"
 )
 
+_STANDALONE_SHELL_FENCE = re.compile(
+    r"```(?:bash|sh|shell)[ \t]*\n(?P<script>.*?)\n```",
+    re.IGNORECASE | re.DOTALL,
+)
+
 def _first_code_line(script):
     for line in script.splitlines():
         stripped = line.strip()
@@ -166,6 +171,20 @@ def _truncate(value, limit=2000):
     if len(value) <= limit:
         return value
     return value[:limit] + f"... <truncated {len(value) - limit} chars>"
+
+
+def normalize_model_script(script):
+    """Unwrap one standalone Shell fence without extracting mixed Markdown."""
+    script = str(script or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+    if "```" not in script:
+        return script
+
+    match = _STANDALONE_SHELL_FENCE.fullmatch(script)
+    if not match or "```" in match.group("script"):
+        raise ScriptValidationError(
+            "Markdown code fences must be one standalone bash, sh, or shell block"
+        )
+    return match.group("script").strip()
 
 
 def extract_repair_script(payload):

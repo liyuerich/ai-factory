@@ -16,6 +16,9 @@ package task
 
 import (
 	"encoding/json"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -262,6 +265,9 @@ spec:
 	if !strings.Contains(commitCommand, "rm -f .ai-factory/agent-prompt.md .ai-factory/task-instructions.md") {
 		t.Fatalf("commit command should remove runtime prompt files before staging, got %#v", commitStep.Command)
 	}
+	if !strings.Contains(commitCommand, "find . -type d -name '__pycache__'") || !strings.Contains(commitCommand, "-name '*.pyc'") {
+		t.Fatalf("commit command should remove Python build artifacts before staging, got %#v", commitStep.Command)
+	}
 	if !strings.Contains(commitCommand, "git add -A && if git diff --cached --quiet") {
 		t.Fatalf("commit command should stage new files before checking for changes, got %#v", commitStep.Command)
 	}
@@ -382,6 +388,9 @@ func TestRunAgentScriptIncludesProviderNeutralSandboxTools(t *testing.T) {
 				"Sandbox tool constraints",
 				"Known development tools include git, go, make, node, npm, python3",
 				"there is no yaml or yq command",
+				"Changes made through Shell tools persist",
+				"never dirname \"$0\"",
+				"Do not run python3 -m py_compile or compileall",
 				"do not install packages during a repair",
 			} {
 				if !strings.Contains(script, want) {
@@ -389,6 +398,65 @@ func TestRunAgentScriptIncludesProviderNeutralSandboxTools(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestCommitChangesScriptRemovesPythonBuildArtifacts(t *testing.T) {
+	repository := t.TempDir()
+	git := func(args ...string) {
+		t.Helper()
+		command := exec.Command("git", append([]string{"-C", repository}, args...)...)
+		if output, err := command.CombinedOutput(); err != nil {
+			t.Fatalf("git %v failed: %v\n%s", args, err, output)
+		}
+	}
+	git("init", "--quiet")
+
+	if err := os.WriteFile(filepath.Join(repository, "change.txt"), []byte("intended\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cacheDirectory := filepath.Join(repository, "pkg", "__pycache__")
+	if err := os.MkdirAll(cacheDirectory, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cacheDirectory, "module.cpython.pyc"), []byte("artifact"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repository, "orphan.pyo"), []byte("artifact"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	promptDirectory := filepath.Join(repository, ".ai-factory")
+	if err := os.MkdirAll(promptDirectory, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"agent-prompt.md", "task-instructions.md"} {
+		if err := os.WriteFile(filepath.Join(promptDirectory, name), []byte("runtime-only"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	command := exec.Command(
+		"/bin/sh",
+		"-lc",
+		commitChangesScript(repository, "test cleanup", "ai-factory", "ai-factory@example.invalid"),
+	)
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("commit changes script failed: %v\n%s", err, output)
+	}
+
+	if _, err := os.Stat(cacheDirectory); !os.IsNotExist(err) {
+		t.Fatalf("Python cache directory still exists: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(repository, "orphan.pyo")); !os.IsNotExist(err) {
+		t.Fatalf("Python bytecode artifact still exists: %v", err)
+	}
+	trackedCommand := exec.Command("git", "-C", repository, "ls-tree", "-r", "--name-only", "HEAD")
+	trackedOutput, err := trackedCommand.Output()
+	if err != nil {
+		t.Fatalf("list committed files: %v", err)
+	}
+	if got := strings.TrimSpace(string(trackedOutput)); got != "change.txt" {
+		t.Fatalf("committed files = %q, want only change.txt", got)
 	}
 }
 

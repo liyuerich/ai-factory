@@ -95,6 +95,8 @@ class RepairPromptTest(unittest.TestCase):
         self.assertIn(failure_output, prompt)
         self.assertIn("must start with a shell command or a shebang", prompt)
         self.assertIn("must not contain tool calls", prompt)
+        self.assertIn("do not derive the repository root", prompt)
+        self.assertIn("Do not run `python3 -m py_compile`", prompt)
 
 
 if __name__ == "__main__":

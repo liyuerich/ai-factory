@@ -20,6 +20,7 @@ from script_validation import (
     RepairResponseError,
     ScriptValidationError,
     extract_repair_script,
+    normalize_model_script,
     validate_shell_script,
 )
 
@@ -40,6 +41,34 @@ class ScriptValidationTest(unittest.TestCase):
 
     def test_rejects_markdown_fence(self):
         self.assertInvalid("```bash\necho done\n```", "code fences")
+
+    def test_normalizes_one_standalone_shell_fence(self):
+        for language in ("bash", "sh", "shell", "BASH"):
+            with self.subTest(language=language):
+                self.assertEqual(
+                    normalize_model_script(
+                        f"```{language}\r\nprintf '%s\\n' valid\r\n```\r\n"
+                    ),
+                    "printf '%s\\n' valid",
+                )
+
+    def test_preserves_unfenced_script(self):
+        script = "printf '%s\\n' valid"
+        self.assertEqual(normalize_model_script(script), script)
+
+    def test_rejects_fence_with_surrounding_prose(self):
+        with self.assertRaisesRegex(ScriptValidationError, "one standalone"):
+            normalize_model_script("Here is the script:\n```bash\nprintf ok\n```")
+
+    def test_rejects_multiple_or_unterminated_fences(self):
+        for script in (
+            "```bash\nprintf first\n```\n```sh\nprintf second\n```",
+            "```bash\nprintf missing-end",
+            "```python\nprint('not shell')\n```",
+        ):
+            with self.subTest(script=script):
+                with self.assertRaisesRegex(ScriptValidationError, "one standalone"):
+                    normalize_model_script(script)
 
     def test_rejects_malformed_shell(self):
         self.assertInvalid("if true; then\n  printf '%s\\n' 'missing fi'", "syntax validation failed")

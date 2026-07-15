@@ -88,6 +88,8 @@ def build_repair_prompt(failure_output, previous_script="", prior_attempts=""):
         "Return only a concise POSIX shell script that repairs the current state and reruns the relevant checks.",
         "Do not explain, do not use Markdown, do not commit, and do not push.",
         "The response must start with a shell command or a shebang and must not contain tool calls.",
+        "The script file is stored outside the repository and runs with the repository root as its current working directory. Use `pwd` or `git rev-parse --show-toplevel`; do not derive the repository root from `dirname \"$0\"`.",
+        "Do not run `python3 -m py_compile` or `compileall`; use `compile(source, filename, \"exec\")` or repository tests so no Python bytecode artifacts are created.",
     ]
 
     missing_command = detect_missing_command(failure_output)
