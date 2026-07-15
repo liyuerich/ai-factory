@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import subprocess
+import os
 import sys
 import unittest
 from pathlib import Path
@@ -186,6 +187,41 @@ class TestCheckConfig(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
         combined = result.stdout + result.stderr
         self.assertNotIn("super-secret-key-12345", combined)
+
+
+LAUNCHER = SCRIPT_DIR / "ai-factory-agent"
+
+
+class TestLauncherCheckConfig(unittest.TestCase):
+    """Launcher-level regression tests for the bash runtime wrapper."""
+
+    def run_launcher_check(self, env):
+        child_env = {
+            "PATH": os.environ.get("PATH", ""),
+            "PYTHONDONTWRITEBYTECODE": "1",
+        }
+        child_env.update(env)
+        return subprocess.run(
+            [str(LAUNCHER), "openai-compatible", "--check-config"],
+            env=child_env,
+            capture_output=True,
+            text=True,
+        )
+
+    def test_check_config_missing_api_key(self):
+        result = self.run_launcher_check({})
+        combined = result.stdout + result.stderr
+        self.assertEqual(
+            result.returncode,
+            2,
+            f"expected exit status 2, got {result.returncode}: {combined}",
+        )
+        self.assertIn("InvalidAgentConfiguration", combined)
+        self.assertIn("OPENAI_API_KEY", combined)
+        self.assertNotIn("Traceback", combined)
+        self.assertNotIn("FactoryTask", combined)
+        self.assertNotIn("--- RUN:", combined)
+        self.assertNotIn("--- TOOL:", combined)
 
 
 if __name__ == "__main__":
