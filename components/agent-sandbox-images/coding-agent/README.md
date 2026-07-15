@@ -30,6 +30,14 @@ Provider configuration:
 - OPENAI_MODEL: provider model name.
 - OPENAI_TEMPERATURE, OPENAI_MAX_TOKENS, OPENAI_MAX_TOOL_ROUNDS,
   OPENAI_MAX_FINAL_SCRIPT_ROUNDS, and OPENAI_MAX_REPAIR_ROUNDS: execution limits.
+- OPENAI_TOTAL_TIMEOUT_SECONDS: total agent deadline, defaulting to 1800 seconds.
+- OPENAI_EXPLORATION_REQUEST_TIMEOUT_SECONDS: per-request exploration timeout,
+  defaulting to 180 seconds.
+- OPENAI_FINAL_REQUEST_TIMEOUT_SECONDS and OPENAI_REPAIR_REQUEST_TIMEOUT_SECONDS:
+  shorter final and repair request timeouts, each defaulting to 90 seconds.
+
+Each model request is attempted at most twice. The shared total deadline caps
+all model retries, Shell calls, and generated or repair script execution.
 
 Other agent CLIs can be selected with AGENT_COMMAND or spec.agent.command.
 The image does not require or assume a particular model provider. The optional

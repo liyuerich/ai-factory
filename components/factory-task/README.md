@@ -29,7 +29,7 @@ The `FACTORY_IMAGE` image must contain the `factory` CLI and `kubectl`.
 Provider credentials are written to the `factory-task-secrets` secret only when
 `GITHUB_TOKEN`, `GITLAB_TOKEN`, `WEBHOOK_SECRET`, `OPENAI_API_KEY`,
 `OPENAI_BASE_URL`, `OPENAI_MODEL`, `OPENAI_TEMPERATURE`, `OPENAI_MAX_TOKENS`,
-`OPENAI_MAX_TOOL_ROUNDS`, or `CODEX_API_KEY` is provided. Re-running the
+the phase round/time limits, or `CODEX_API_KEY` is provided. Re-running the
 installer without those values leaves any existing secret untouched.
 
 ## Runtime settings
@@ -60,6 +60,10 @@ installer without those values leaves any existing secret untouched.
 | `OPENAI_MAX_TOOL_ROUNDS` | empty | Optional OpenAI-compatible shell tool round limit injected into agent tasks. |
 | `OPENAI_MAX_FINAL_SCRIPT_ROUNDS` | empty | Optional OpenAI-compatible no-tool final script retry limit injected into agent tasks. |
 | `OPENAI_MAX_REPAIR_ROUNDS` | empty | Optional OpenAI-compatible generated-script repair round limit injected into agent tasks. |
+| `OPENAI_TOTAL_TIMEOUT_SECONDS` | empty | Optional total agent deadline injected into agent tasks. |
+| `OPENAI_EXPLORATION_REQUEST_TIMEOUT_SECONDS` | empty | Optional per-request exploration timeout injected into agent tasks. |
+| `OPENAI_FINAL_REQUEST_TIMEOUT_SECONDS` | empty | Optional per-request final-script timeout injected into agent tasks. |
+| `OPENAI_REPAIR_REQUEST_TIMEOUT_SECONDS` | empty | Optional per-request repair-script timeout injected into agent tasks. |
 | `CODEX_API_KEY` | empty | Optional Codex API key for tasks that override `AGENT_COMMAND` to Codex. |
 | `WEBHOOK_INGRESS_HOST` | empty | Optional host for creating a webhook `Ingress`. |
 | `WEBHOOK_INGRESS_CLASS` | empty | Optional ingress class name when `WEBHOOK_INGRESS_HOST` is set. |
@@ -214,6 +218,10 @@ provider such as Kimi, DeepSeek, Qwen, Ollama, or vLLM:
 | `AI_FACTORY_OPENAI_MAX_TOOL_ROUNDS` | `40` | Maximum Shell tool call rounds. |
 | `AI_FACTORY_OPENAI_MAX_FINAL_SCRIPT_ROUNDS` | `5` | Maximum no-tool final script retries. |
 | `AI_FACTORY_OPENAI_MAX_REPAIR_ROUNDS` | `3` | Maximum repair attempts after a failed script. |
+| `AI_FACTORY_OPENAI_TOTAL_TIMEOUT_SECONDS` | `1800` | Total agent deadline, below the 45-minute job timeout. |
+| `AI_FACTORY_OPENAI_EXPLORATION_REQUEST_TIMEOUT_SECONDS` | `180` | Timeout for each exploration model request. |
+| `AI_FACTORY_OPENAI_FINAL_REQUEST_TIMEOUT_SECONDS` | `90` | Timeout for each final-script model request. |
+| `AI_FACTORY_OPENAI_REPAIR_REQUEST_TIMEOUT_SECONDS` | `90` | Timeout for each repair-script model request. |
 
 ### Example issue body
 
@@ -310,6 +318,10 @@ shell script, and executes that script in the cloned repository. It uses:
 | `OPENAI_MAX_TOOL_ROUNDS` | `40` | Maximum Shell tool call rounds before the model must return a script. |
 | `OPENAI_MAX_FINAL_SCRIPT_ROUNDS` | `5` | Maximum no-tool final script retries if the model still attempts tool calls. |
 | `OPENAI_MAX_REPAIR_ROUNDS` | `3` | Maximum generated-script repair attempts after the script exits non-zero. |
+| `OPENAI_TOTAL_TIMEOUT_SECONDS` | `1800` | Total agent deadline shared by all phases. |
+| `OPENAI_EXPLORATION_REQUEST_TIMEOUT_SECONDS` | `180` | Timeout for each exploration model request. |
+| `OPENAI_FINAL_REQUEST_TIMEOUT_SECONDS` | `90` | Timeout for each final-script model request. |
+| `OPENAI_REPAIR_REQUEST_TIMEOUT_SECONDS` | `90` | Timeout for each repair-script model request. |
 
 ## Sandbox git authentication
 

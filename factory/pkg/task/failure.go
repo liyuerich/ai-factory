@@ -29,6 +29,9 @@ const (
 	ModelOutputTruncated FailureReason = "ModelOutputTruncated"
 	// ToolRoundsExhausted means the agent consumed all available tool rounds.
 	ToolRoundsExhausted FailureReason = "ToolRoundsExhausted"
+	// FinalScriptRoundsExhausted means the model did not produce an executable
+	// final script within the no-tool response limit.
+	FinalScriptRoundsExhausted FailureReason = "FinalScriptRoundsExhausted"
 	// EmptyRepairScript means the model returned an empty repair script after
 	// a generated script failed.
 	EmptyRepairScript FailureReason = "EmptyRepairScript"
@@ -46,6 +49,8 @@ const (
 	InvalidGeneratedScript FailureReason = "InvalidGeneratedScript"
 	// ModelTimeout means the model API or network request timed out.
 	ModelTimeout FailureReason = "ModelTimeout"
+	// TotalExecutionDeadlineExceeded means the shared Agent deadline expired.
+	TotalExecutionDeadlineExceeded FailureReason = "TotalExecutionDeadlineExceeded"
 	// ValidationFailed means validation commands (e.g. go test) failed.
 	ValidationFailed FailureReason = "ValidationFailed"
 	// CommandUnavailable means an expected tool was not available in the sandbox.
@@ -100,6 +105,9 @@ func ClassifyFailure(message string) FailureClassification {
 		strings.Contains(lower, "tool calls during all final script attempts"):
 		fc.Reason = ToolRoundsExhausted
 		fc.Friendly = "The agent used all available shell tool rounds before producing a final script."
+	case strings.Contains(lower, "finalscriptroundsexhausted"):
+		fc.Reason = FinalScriptRoundsExhausted
+		fc.Friendly = "The model did not produce an executable final script within the configured no-tool round limit."
 	case strings.Contains(lower, "empty repair script") ||
 		strings.Contains(lower, "empty repair response"):
 		fc.Reason = EmptyRepairScript
@@ -120,7 +128,11 @@ func ClassifyFailure(message string) FailureClassification {
 		strings.Contains(lower, "markdown code fences are not allowed"):
 		fc.Reason = InvalidGeneratedScript
 		fc.Friendly = "The model returned non-executable or invalid shell content."
-	case strings.Contains(lower, "api request failed") ||
+	case strings.Contains(lower, "totalexecutiondeadlineexceeded"):
+		fc.Reason = TotalExecutionDeadlineExceeded
+		fc.Friendly = "The Agent reached its total execution deadline."
+	case strings.Contains(lower, "modelrequesttimeout") ||
+		strings.Contains(lower, "api request failed") ||
 		strings.Contains(lower, "unexpected eof") ||
 		strings.Contains(lower, "timed out"):
 		fc.Reason = ModelTimeout
@@ -180,12 +192,14 @@ func FailureReasonList() []FailureReason {
 	return []FailureReason{
 		ModelOutputTruncated,
 		ToolRoundsExhausted,
+		FinalScriptRoundsExhausted,
 		EmptyRepairScript,
 		RepeatedInvalidRepairScript,
 		RepeatedInvalidRepairResponseFormat,
 		RepairRoundsExhausted,
 		InvalidGeneratedScript,
 		ModelTimeout,
+		TotalExecutionDeadlineExceeded,
 		ValidationFailed,
 		CommandUnavailable,
 		NoChangeRequest,

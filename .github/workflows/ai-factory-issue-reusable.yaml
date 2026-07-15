@@ -60,6 +60,14 @@ jobs:
         || '5' }}
       OPENAI_MAX_REPAIR_ROUNDS: ${{ vars.AI_FACTORY_OPENAI_MAX_REPAIR_ROUNDS || '3'
         }}
+      OPENAI_TOTAL_TIMEOUT_SECONDS: ${{ vars.AI_FACTORY_OPENAI_TOTAL_TIMEOUT_SECONDS
+        || '1800' }}
+      OPENAI_EXPLORATION_REQUEST_TIMEOUT_SECONDS: ${{ vars.AI_FACTORY_OPENAI_EXPLORATION_REQUEST_TIMEOUT_SECONDS
+        || '180' }}
+      OPENAI_FINAL_REQUEST_TIMEOUT_SECONDS: ${{ vars.AI_FACTORY_OPENAI_FINAL_REQUEST_TIMEOUT_SECONDS
+        || '90' }}
+      OPENAI_REPAIR_REQUEST_TIMEOUT_SECONDS: ${{ vars.AI_FACTORY_OPENAI_REPAIR_REQUEST_TIMEOUT_SECONDS
+        || '90' }}
     steps:
     - name: Go runtime preflight
       run: bash ./go-runtime-preflight.sh
@@ -124,7 +132,7 @@ jobs:
         \ \\\n  --agent-env OPENAI_BASE_URL \\\n  --agent-env OPENAI_MODEL \\\n  --agent-env\
         \ OPENAI_TEMPERATURE \\\n  --agent-env OPENAI_MAX_TOKENS \\\n  --agent-env\
         \ OPENAI_MAX_TOOL_ROUNDS \\\n  --agent-env OPENAI_MAX_FINAL_SCRIPT_ROUNDS\
-        \ \\\n  --agent-env OPENAI_MAX_REPAIR_ROUNDS \\\n  --command \"$VALIDATION_COMMAND\"\
+        \ \\\n  --agent-env OPENAI_MAX_REPAIR_ROUNDS \\\n  --agent-env OPENAI_TOTAL_TIMEOUT_SECONDS \\\n  --agent-env OPENAI_EXPLORATION_REQUEST_TIMEOUT_SECONDS \\\n  --agent-env OPENAI_FINAL_REQUEST_TIMEOUT_SECONDS \\\n  --agent-env OPENAI_REPAIR_REQUEST_TIMEOUT_SECONDS \\\n  --command \"$VALIDATION_COMMAND\"\
         \ \\\n  --change-request=true \\\n  --change-request-auth-token-env AI_FACTORY_GITHUB_TOKEN\
         \ \\\n  --reporting-mode comment \\\n  > \"$RUNNER_TEMP/webhook.log\" 2>&1\
         \ &\nWEBHOOK_PID=$!\ntrap 'kill \"$WEBHOOK_PID\" 2>/dev/null || true' EXIT\n\

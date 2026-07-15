@@ -15,6 +15,7 @@
 import subprocess
 import unittest
 
+from agent_budget import AgentBudgetError
 from repair_loop import (
     RepairCandidate,
     RepairLoopTerminated,
@@ -161,6 +162,30 @@ class RepairLoopTest(unittest.TestCase):
         self.assertIn("Configured maximum repair rounds: 2", raised.exception.diagnostics)
         self.assertIn("printf first failed", raised.exception.diagnostics)
         self.assertIn("printf second failed", raised.exception.diagnostics)
+
+    def test_request_timeout_preserves_repair_history_and_provider_diagnostics(self):
+        def request_repair(*_args):
+            raise AgentBudgetError(
+                "ModelRequestTimeout",
+                "repair-script",
+                "attempts=2/2",
+                diagnostics="provider timeout detail",
+            )
+
+        with self.assertRaises(RepairLoopTerminated) as raised:
+            run_repair_loop(
+                "printf generated",
+                completed(1, stderr="generated failed"),
+                3,
+                request_repair,
+                lambda _script, _label: completed(0),
+            )
+
+        self.assertIn("ModelRequestTimeout", raised.exception.reason)
+        self.assertIn("phase=repair-script", raised.exception.reason)
+        self.assertIn("printf generated", raised.exception.diagnostics)
+        self.assertIn("generated failed", raised.exception.diagnostics)
+        self.assertIn("provider timeout detail", raised.exception.diagnostics)
 
 
 if __name__ == "__main__":

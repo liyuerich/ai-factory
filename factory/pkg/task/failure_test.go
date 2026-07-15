@@ -40,6 +40,12 @@ func TestClassifyFailureRecognizesKnownReasons(t *testing.T) {
 			wantMsg: "shell tool rounds",
 		},
 		{
+			name:    "FinalScriptRoundsExhausted",
+			message: "FinalScriptRoundsExhausted: phase=final-script; used_rounds=5; limit=5",
+			want:    FinalScriptRoundsExhausted,
+			wantMsg: "no-tool round limit",
+		},
+		{
 			name:    "EmptyRepairScript",
 			message: "agent failed: empty repair script after apply",
 			want:    EmptyRepairScript,
@@ -104,6 +110,18 @@ func TestClassifyFailureRecognizesKnownReasons(t *testing.T) {
 			message: "api request failed: unexpected EOF while waiting for response",
 			want:    ModelTimeout,
 			wantMsg: "network request",
+		},
+		{
+			name:    "PhaseAwareModelRequestTimeout",
+			message: "ModelRequestTimeout: phase=repair-script; attempts=2/2",
+			want:    ModelTimeout,
+			wantMsg: "network request",
+		},
+		{
+			name:    "TotalExecutionDeadlineExceeded",
+			message: "TotalExecutionDeadlineExceeded: phase=tool-exploration; elapsed_seconds=1800",
+			want:    TotalExecutionDeadlineExceeded,
+			wantMsg: "total execution deadline",
 		},
 		{
 			name:    "ValidationFailedGoTest",
@@ -216,12 +234,14 @@ func TestShouldRetryFailure(t *testing.T) {
 	}{
 		{reason: ModelOutputTruncated, want: true},
 		{reason: ToolRoundsExhausted, want: true},
+		{reason: FinalScriptRoundsExhausted, want: false},
 		{reason: EmptyRepairScript, want: true},
 		{reason: RepeatedInvalidRepairScript, want: false},
 		{reason: RepeatedInvalidRepairResponseFormat, want: false},
 		{reason: RepairRoundsExhausted, want: false},
 		{reason: InvalidGeneratedScript, want: false},
 		{reason: ModelTimeout, want: true},
+		{reason: TotalExecutionDeadlineExceeded, want: false},
 		{reason: ValidationFailed, want: false},
 		{reason: CommandUnavailable, want: false},
 		{reason: NoChangeRequest, want: false},
@@ -261,7 +281,7 @@ func TestFailureReasonList(t *testing.T) {
 		}
 		seen[r] = true
 	}
-	for _, want := range []FailureReason{ModelOutputTruncated, ToolRoundsExhausted, EmptyRepairScript, InvalidGeneratedScript, ModelTimeout, ValidationFailed, CommandUnavailable, NoChangeRequest} {
+	for _, want := range []FailureReason{ModelOutputTruncated, ToolRoundsExhausted, FinalScriptRoundsExhausted, EmptyRepairScript, InvalidGeneratedScript, ModelTimeout, TotalExecutionDeadlineExceeded, ValidationFailed, CommandUnavailable, NoChangeRequest} {
 		if !seen[want] {
 			t.Fatalf("expected reason %q in FailureReasonList", want)
 		}

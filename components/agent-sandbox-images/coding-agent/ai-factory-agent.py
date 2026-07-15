@@ -18,10 +18,13 @@ import stat
 import subprocess
 import sys
 import tempfile
-import time
-import urllib.error
-import urllib.request
 
+from agent_budget import (
+    AgentBudgetError,
+    ExecutionDeadline,
+    PhaseRoundBudget,
+    post_chat_completion,
+)
 from repair_loop import RepairCandidate, RepairLoopTerminated, run_repair_loop
 from script_validation import (
     SCRIPT_HEADER,
@@ -54,6 +57,12 @@ def truncate(value, limit=4000):
 
 def dump_response_diagnostics(payload):
     print("OpenAI-compatible response diagnostics:", file=sys.stderr)
+    if not isinstance(payload, dict):
+        print(
+            f"  payload: {type(payload).__name__} {truncate(payload)}",
+            file=sys.stderr,
+        )
+        return
     print(f"  id: {payload.get('id', '<missing>')}", file=sys.stderr)
     print(f"  object: {payload.get('object', '<missing>')}", file=sys.stderr)
     print(f"  model: {payload.get('model', '<missing>')}", file=sys.stderr)
@@ -82,55 +91,6 @@ def dump_response_diagnostics(payload):
         print(f"  usage: {truncate(usage, 1200)}", file=sys.stderr)
 
 
-def response_preview(payload):
-    try:
-        return truncate(json.dumps(payload, ensure_ascii=False, sort_keys=True), 4000)
-    except (TypeError, ValueError):
-        return truncate(payload, 4000)
-
-
-def post_chat_completion(request, base_url, api_key):
-    data = json.dumps(request).encode("utf-8")
-    for attempt in range(1, 4):
-        http_request = urllib.request.Request(
-            f"{base_url}/chat/completions",
-            data=data,
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            },
-            method="POST",
-        )
-        try:
-            with urllib.request.urlopen(http_request, timeout=300) as response:
-                response_body = response.read()
-                break
-        except urllib.error.HTTPError as exc:
-            detail = exc.read().decode("utf-8", errors="replace")
-            retryable = exc.code in (408, 409, 425, 429, 500, 502, 503, 504)
-            if retryable and attempt < 3:
-                print(f"OpenAI-compatible API request failed: HTTP {exc.code}; retrying ({attempt}/3)", file=sys.stderr)
-                time.sleep(2 * attempt)
-                continue
-            print(f"OpenAI-compatible API request failed: HTTP {exc.code}", file=sys.stderr)
-            print(detail, file=sys.stderr)
-            sys.exit(1)
-        except (urllib.error.URLError, TimeoutError, ConnectionError) as exc:
-            if attempt < 3:
-                print(f"OpenAI-compatible API request failed: {exc}; retrying ({attempt}/3)", file=sys.stderr)
-                time.sleep(2 * attempt)
-                continue
-            print(f"OpenAI-compatible API request failed: {exc}", file=sys.stderr)
-            sys.exit(1)
-
-    try:
-        return json.loads(response_body)
-    except json.JSONDecodeError as exc:
-        print(f"OpenAI-compatible API response was not valid JSON: {exc}", file=sys.stderr)
-        print(truncate(response_body.decode("utf-8", errors="replace")), file=sys.stderr)
-        sys.exit(1)
-
-
 def redact(text):
     secret_names = (
         "OPENAI_API_KEY",
@@ -147,7 +107,13 @@ def redact(text):
     return redacted
 
 
-def run_shell_tool(arguments):
+def subprocess_output(value):
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return str(value or "")
+
+
+def run_shell_tool(arguments, deadline):
     try:
         args = json.loads(arguments or "{}")
     except json.JSONDecodeError as exc:
@@ -157,16 +123,30 @@ def run_shell_tool(arguments):
         return "invalid Shell tool arguments: command must be a non-empty string"
     print(f"--- TOOL: Shell {command}", file=sys.stderr)
     try:
+        timeout = deadline.request_timeout("tool-exploration", 120)
+    except AgentBudgetError as exc:
+        return str(exc)
+    try:
         completed = subprocess.run(
             ["/bin/bash", "-lc", command],
             check=False,
             capture_output=True,
             text=True,
-            timeout=120,
+            timeout=timeout,
         )
     except subprocess.TimeoutExpired as exc:
-        output = (exc.stdout or "") + (exc.stderr or "")
-        return f"Shell tool timed out after 120s\n{truncate(redact(output), 12000)}"
+        output = subprocess_output(exc.stdout) + subprocess_output(exc.stderr)
+        if deadline.remaining_seconds() <= 0:
+            error = deadline.exhausted_error(
+                "tool-exploration",
+                diagnostics=truncate(redact(output), 12000),
+            )
+            return f"{error}\n{error.diagnostics}"
+        return (
+            "ShellToolTimeout: phase=tool-exploration; "
+            f"request_timeout_seconds={timeout:.3f}\n"
+            f"{truncate(redact(output), 12000)}"
+        )
     output = [
         f"exit_code={completed.returncode}",
         "--- stdout ---",
@@ -177,7 +157,7 @@ def run_shell_tool(arguments):
     return truncate(redact("\n".join(output)), 12000)
 
 
-def run_tool_calls(tool_calls):
+def run_tool_calls(tool_calls, deadline):
     tool_messages = []
     for tool_call in tool_calls:
         function = tool_call.get("function") or {}
@@ -186,7 +166,7 @@ def run_tool_calls(tool_calls):
         if name != "Shell":
             content = f"unsupported tool: {name}"
         else:
-            content = run_shell_tool(arguments)
+            content = run_shell_tool(arguments, deadline)
         tool_messages.append(
             {
                 "role": "tool",
@@ -207,7 +187,7 @@ def write_script(script):
     return script_path
 
 
-def run_generated_script(script, model, label):
+def run_generated_script(script, model, label, deadline):
     try:
         script = validate_shell_script(script)
     except ScriptValidationError as exc:
@@ -221,13 +201,43 @@ def run_generated_script(script, model, label):
         )
     script_path = write_script(script)
     print(f"--- RUN: OpenAI-compatible {label} script ({model})")
+    phase = "repair-script-execution" if label.startswith("repair") else "generated-script-execution"
     try:
-        completed = subprocess.run(
-            ["/bin/bash", script_path],
-            check=False,
-            capture_output=True,
-            text=True,
+        timeout = deadline.request_timeout(phase, deadline.total_timeout_seconds)
+    except AgentBudgetError as exc:
+        try:
+            os.unlink(script_path)
+        except OSError:
+            pass
+        return subprocess.CompletedProcess(
+            args=["/bin/bash", script_path],
+            returncode=124,
+            stdout="",
+            stderr=f"{exc}\n",
         )
+    try:
+        try:
+            completed = subprocess.run(
+                ["/bin/bash", script_path],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+            )
+        except subprocess.TimeoutExpired as exc:
+            stdout = subprocess_output(exc.stdout)
+            stderr = subprocess_output(exc.stderr)
+            output = stdout + stderr
+            error = deadline.exhausted_error(
+                phase,
+                diagnostics=truncate(redact(output), 12000),
+            )
+            completed = subprocess.CompletedProcess(
+                args=["/bin/bash", script_path],
+                returncode=124,
+                stdout=stdout,
+                stderr=f"{error}\n{error.diagnostics}\n",
+            )
     finally:
         try:
             os.unlink(script_path)
@@ -248,6 +258,17 @@ max_tokens = int(os.environ.get("OPENAI_MAX_TOKENS", "48000"))
 max_tool_rounds = int(os.environ.get("OPENAI_MAX_TOOL_ROUNDS", "40"))
 max_final_script_rounds = int(os.environ.get("OPENAI_MAX_FINAL_SCRIPT_ROUNDS", "5"))
 max_repair_rounds = int(os.environ.get("OPENAI_MAX_REPAIR_ROUNDS", "3"))
+total_timeout_seconds = float(os.environ.get("OPENAI_TOTAL_TIMEOUT_SECONDS", "1800"))
+exploration_request_timeout_seconds = float(
+    os.environ.get("OPENAI_EXPLORATION_REQUEST_TIMEOUT_SECONDS", "180")
+)
+final_request_timeout_seconds = float(
+    os.environ.get("OPENAI_FINAL_REQUEST_TIMEOUT_SECONDS", "90")
+)
+repair_request_timeout_seconds = float(
+    os.environ.get("OPENAI_REPAIR_REQUEST_TIMEOUT_SECONDS", "90")
+)
+execution_deadline = ExecutionDeadline(total_timeout_seconds)
 with open(required_env("AI_FACTORY_PROMPT_FILE"), "r", encoding="utf-8") as prompt_handle:
     prompt = prompt_handle.read()
 if not prompt.strip():
@@ -291,106 +312,241 @@ tools = [
     }
 ]
 
-content = ""
-payload = {}
-final_script_prompt_added = False
-for round_index in range(max_tool_rounds + max_final_script_rounds + 1):
-    final_script_round = round_index > max_tool_rounds
-    if final_script_round and not final_script_prompt_added:
-        messages.append(
-            {
-                "role": "user",
-                "content": (
-                    "You have reached the Shell tool limit. Do not call more tools. "
-                    "Return only the final POSIX shell script now."
-                ),
-            }
+def request_model(request, phase, request_timeout_seconds, exit_on_error=True):
+    try:
+        return post_chat_completion(
+            request,
+            base_url,
+            api_key,
+            phase,
+            request_timeout_seconds,
+            execution_deadline,
         )
-        final_script_prompt_added = True
-    request = {
-        "model": model,
-        "messages": messages,
-        "temperature": temperature,
-        "max_tokens": max_tokens,
-    }
-    if final_script_round:
-        request["tool_choice"] = "none"
-    else:
-        request["tools"] = tools
-        request["tool_choice"] = "auto"
-    payload = post_chat_completion(request, base_url, api_key)
+    except AgentBudgetError as exc:
+        if not exit_on_error:
+            raise
+        print(str(exc), file=sys.stderr)
+        if exc.diagnostics:
+            print("--- provider diagnostics start ---", file=sys.stderr)
+            print(redact(exc.diagnostics), file=sys.stderr)
+            print("--- provider diagnostics end ---", file=sys.stderr)
+        sys.exit(1)
 
+
+def parse_model_message(payload, phase):
     try:
         choice = payload["choices"][0]
         message = choice["message"]
-        content = message.get("content") or ""
+        raw_content = message.get("content")
+        if raw_content is not None and not isinstance(raw_content, str):
+            raise TypeError(
+                f"message.content must be a string or null, got {type(raw_content).__name__}"
+            )
+        content = raw_content or ""
         tool_calls = message.get("tool_calls") or []
-    except (KeyError, IndexError, TypeError) as exc:
-        print(f"OpenAI-compatible API response did not contain choices[0].message.content: {exc}", file=sys.stderr)
+        if not isinstance(tool_calls, list):
+            raise TypeError(
+                f"message.tool_calls must be a list, got {type(tool_calls).__name__}"
+            )
+    except (AttributeError, KeyError, IndexError, TypeError) as exc:
+        print(
+            "InvalidModelResponse: "
+            f"phase={phase}; response did not contain choices[0].message: {exc}",
+            file=sys.stderr,
+        )
         dump_response_diagnostics(payload)
-        print(response_preview(payload), file=sys.stderr)
+        print(redact(json.dumps(payload, ensure_ascii=False, sort_keys=True)), file=sys.stderr)
         sys.exit(1)
+    return choice, message, content, tool_calls
 
+
+script = ""
+payload = {}
+invalid_provider_responses = []
+tool_budget = PhaseRoundBudget(
+    "tool-exploration",
+    max_tool_rounds,
+    "ToolRoundsExhausted",
+)
+while not script:
+    try:
+        tool_round = tool_budget.next_round()
+    except AgentBudgetError as exc:
+        print(
+            f"{exc}; switching to phase=final-script",
+            file=sys.stderr,
+        )
+        break
+
+    payload = request_model(
+        {
+            "model": model,
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "tools": tools,
+            "tool_choice": "auto",
+        },
+        "tool-exploration",
+        exploration_request_timeout_seconds,
+    )
+    choice, message, content, tool_calls = parse_model_message(
+        payload,
+        "tool-exploration",
+    )
     dump_response_diagnostics(payload)
     finish_reason = choice.get("finish_reason", "")
-    if not tool_calls and finish_reason == "length":
-        if round_index >= max_tool_rounds + max_final_script_rounds:
-            print("OpenAI-compatible model response was truncated during all final script attempts", file=sys.stderr)
-            print(response_preview(payload), file=sys.stderr)
+
+    if tool_calls:
+        assistant_message = {
+            "role": "assistant",
+            "content": message.get("content"),
+            "tool_calls": tool_calls,
+        }
+        if "reasoning_content" in message:
+            assistant_message["reasoning_content"] = message.get("reasoning_content")
+        messages.append(assistant_message)
+        messages.extend(run_tool_calls(tool_calls, execution_deadline))
+        print(
+            "OpenAI-compatible tool exploration round completed: "
+            f"used_rounds={tool_round}; limit={max_tool_rounds}",
+            file=sys.stderr,
+        )
+        continue
+
+    if content.strip() and finish_reason != "length":
+        script = content
+        break
+
+    invalid_provider_responses.append(
+        (
+            "tool-exploration",
+            redact(json.dumps(payload, ensure_ascii=False, sort_keys=True)),
+        )
+    )
+    if finish_reason == "length":
+        print(
+            "ModelOutputTruncated: phase=tool-exploration; switching to "
+            "phase=final-script",
+            file=sys.stderr,
+        )
+    else:
+        print(
+            "EmptyModelResponse: phase=tool-exploration; switching to "
+            "phase=final-script",
+            file=sys.stderr,
+        )
+    break
+
+if not script:
+    messages.append(
+        {
+            "role": "user",
+            "content": (
+                "Tool exploration is finished. Do not call more tools. "
+                "Return only the final POSIX shell script now."
+            ),
+        }
+    )
+    final_budget = PhaseRoundBudget(
+        "final-script",
+        max_final_script_rounds,
+        "FinalScriptRoundsExhausted",
+    )
+    while not script:
+        try:
+            final_attempt = final_budget.next_round()
+        except AgentBudgetError as exc:
+            print(str(exc), file=sys.stderr)
+            for response_index, phase_response in enumerate(
+                invalid_provider_responses,
+                start=1,
+            ):
+                response_phase, provider_response = phase_response
+                print(
+                    "--- provider response "
+                    f"{response_index} phase={response_phase} start ---",
+                    file=sys.stderr,
+                )
+                print(provider_response, file=sys.stderr)
+                print(
+                    "--- provider response "
+                    f"{response_index} phase={response_phase} end ---",
+                    file=sys.stderr,
+                )
             sys.exit(1)
-        print("OpenAI-compatible model response was truncated; requesting a shorter final script", file=sys.stderr)
+
+        payload = request_model(
+            {
+                "model": model,
+                "messages": messages,
+                "tool_choice": "none",
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+            },
+            "final-script",
+            final_request_timeout_seconds,
+        )
+        choice, _message, content, tool_calls = parse_model_message(
+            payload,
+            "final-script",
+        )
+        dump_response_diagnostics(payload)
+        finish_reason = choice.get("finish_reason", "")
+
+        if not tool_calls and content.strip() and finish_reason != "length":
+            script = content
+            break
+
+        invalid_provider_responses.append(
+            (
+                "final-script",
+                redact(json.dumps(payload, ensure_ascii=False, sort_keys=True)),
+            )
+        )
+        if tool_calls:
+            attempted_tools = truncate(
+                json.dumps(tool_calls, ensure_ascii=False),
+                2000,
+            )
+            retry_detail = (
+                "Your last response still tried to call tools, but no more "
+                "tools are available. Do not call Shell. "
+                f"Attempted tool calls: {attempted_tools}"
+            )
+        elif finish_reason == "length":
+            retry_detail = (
+                "Your last response was truncated by the token limit. Return "
+                "a shorter script."
+            )
+        else:
+            retry_detail = (
+                "Your last response did not contain a script. Do not return "
+                "only analysis or reasoning."
+            )
+        print(
+            "InvalidFinalScriptResponse: phase=final-script; "
+            f"used_rounds={final_attempt}; limit={max_final_script_rounds}; "
+            f"finish_reason={finish_reason!r}; tool_calls={len(tool_calls)}; "
+            f"content_length={len(content)}",
+            file=sys.stderr,
+        )
         messages.append(
             {
                 "role": "user",
                 "content": (
-                    "Your last response was truncated by the token limit. "
-                    "Do not include analysis or comments. Return a shorter POSIX shell script now. "
-                    "Prefer a compact script that writes small helper files and lets those helpers inspect the repository at runtime."
+                    f"{retry_detail} Do not include analysis or comments. "
+                    "Return only a concise POSIX shell script."
                 ),
             }
         )
-        continue
-    if tool_calls:
-        if final_script_round:
-            final_attempt = round_index - max_tool_rounds
-            if final_attempt >= max_final_script_rounds:
-                print(f"OpenAI-compatible model returned tool calls during all final script attempts ({max_final_script_rounds})", file=sys.stderr)
-                print(response_preview(payload), file=sys.stderr)
-                sys.exit(1)
-            attempted_tools = truncate(json.dumps(tool_calls, ensure_ascii=False), 2000)
-            print("OpenAI-compatible model returned tool calls during final script generation; retrying without tools", file=sys.stderr)
-            messages.append(
-                {
-                    "role": "user",
-                    "content": (
-                        "Your last response still tried to call tools, but no more tools are available. "
-                        "Do not call Shell. Use the information you already gathered and return only the final POSIX shell script. "
-                        f"Attempted tool calls: {attempted_tools}"
-                    ),
-                }
-            )
-            continue
-        if round_index >= max_tool_rounds:
-            print(f"OpenAI-compatible model reached max tool rounds ({max_tool_rounds}); requesting final script without tools", file=sys.stderr)
-            continue
-        messages.append(
-            {
-                "role": "assistant",
-                "content": content,
-                "tool_calls": tool_calls,
-            }
-        )
-        messages.extend(run_tool_calls(tool_calls))
-        continue
-    break
 
-script = content
-if not script.strip():
-    print("OpenAI-compatible model returned an empty script", file=sys.stderr)
-    print(response_preview(payload), file=sys.stderr)
-    sys.exit(1)
-
-completed = run_generated_script(script, model, "generated")
+completed = run_generated_script(
+    script,
+    model,
+    "generated",
+    execution_deadline,
+)
 
 
 def request_repair(round_number, round_limit, repair_prompt):
@@ -399,7 +555,7 @@ def request_repair(round_number, round_limit, repair_prompt):
         f"({round_number}/{round_limit})",
         file=sys.stderr,
     )
-    repair_payload = post_chat_completion(
+    repair_payload = request_model(
         {
             "model": model,
             "messages": [
@@ -411,8 +567,9 @@ def request_repair(round_number, round_limit, repair_prompt):
             "temperature": temperature,
             "max_tokens": max_tokens,
         },
-        base_url,
-        api_key,
+        "repair-script",
+        repair_request_timeout_seconds,
+        exit_on_error=False,
     )
     dump_response_diagnostics(repair_payload)
     try:
@@ -431,7 +588,12 @@ try:
         completed,
         max_repair_rounds,
         request_repair,
-        lambda repair_script, label: run_generated_script(repair_script, model, label),
+        lambda repair_script, label: run_generated_script(
+            repair_script,
+            model,
+            label,
+            execution_deadline,
+        ),
         redact=redact,
     )
 except RepairLoopTerminated as exc:

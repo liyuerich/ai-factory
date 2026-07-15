@@ -17,6 +17,7 @@
 from dataclasses import dataclass
 import hashlib
 
+from agent_budget import AgentBudgetError
 from repair_prompt import build_repair_prompt, format_failure_output
 
 
@@ -223,7 +224,28 @@ def run_repair_loop(
             previous_script=previous.script,
             prior_attempts=history.prompt_history(),
         )
-        candidate = request_repair(round_number, max_rounds, prompt)
+        try:
+            candidate = request_repair(round_number, max_rounds, prompt)
+        except AgentBudgetError as exc:
+            terminal_reason = str(exc)
+            diagnostics = history.terminal_diagnostics(
+                terminal_reason,
+                max_rounds,
+            )
+            if exc.diagnostics:
+                diagnostics = "\n".join(
+                    [
+                        diagnostics,
+                        "--- provider diagnostics start ---",
+                        redact(exc.diagnostics),
+                        "--- provider diagnostics end ---",
+                    ]
+                )
+            raise RepairLoopTerminated(
+                terminal_reason,
+                1,
+                diagnostics,
+            ) from exc
         if candidate.error or not candidate.script.strip():
             reason = candidate.error or "model returned an empty repair script"
             repeated = history.record_invalid_response(
