@@ -69,9 +69,6 @@ jobs:
       OPENAI_REPAIR_REQUEST_TIMEOUT_SECONDS: ${{ vars.AI_FACTORY_OPENAI_REPAIR_REQUEST_TIMEOUT_SECONDS
         || '90' }}
     steps:
-    - name: Go runtime preflight
-      run: bash ./go-runtime-preflight.sh
-      shell: bash
     - name: Checkout target repository
       uses: actions/checkout@v4
       with:
@@ -91,6 +88,13 @@ jobs:
         go-version-file: factory/go.mod
         cache-dependency-path: factory/go.sum
         cache: true
+    - name: Go runtime preflight
+      run: bash factory/go-runtime-preflight.sh
+      shell: bash
+    - name: OpenAI-compatible agent configuration preflight
+      if: contains(inputs.agent_command, 'openai-compatible')
+      run: bash factory/components/agent-sandbox-images/coding-agent/ai-factory-agent openai-compatible --check-config
+      shell: bash
     - name: Create kind cluster
       uses: helm/kind-action@v1.12.0
       with:
@@ -100,10 +104,18 @@ jobs:
         \ \"$AGENT_SANDBOX_SRC\"\nIMAGE_PREFIX=ai-factory IMAGE_TAG=ci KIND_CLUSTER_NAME=\"\
         $KIND_CLUSTER_NAME\" \\\n  AGENT_SANDBOX_SRC=\"$AGENT_SANDBOX_SRC\" factory/components/agent-sandbox/install\n"
     - name: Build coding agent sandbox image
-      run: "GO_VERSION=\"$(awk '/^go / {print $2; exit}' factory/go.mod)\"\ndocker\
-        \ build --build-arg GO_VERSION=\"$GO_VERSION\" \\\n  -t \"$CODING_AGENT_IMAGE\"\
-        \ factory/components/agent-sandbox-images/coding-agent\nkind load docker-image\
-        \ \"$CODING_AGENT_IMAGE\" --name \"$KIND_CLUSTER_NAME\"\n"
+      run: |
+        GO_VERSION="$(awk '/^go / {print $2; exit}' factory/go.mod)"
+        INSTALL_CODEX_CLI=false
+        if [[ "$AGENT_COMMAND" == *"codex"* ]]; then
+          INSTALL_CODEX_CLI=true
+        fi
+        docker build \
+          --build-arg GO_VERSION="$GO_VERSION" \
+          --build-arg INSTALL_CODEX_CLI="$INSTALL_CODEX_CLI" \
+          -t "$CODING_AGENT_IMAGE" \
+          factory/components/agent-sandbox-images/coding-agent
+        kind load docker-image "$CODING_AGENT_IMAGE" --name "$KIND_CLUSTER_NAME"
     - name: Create sandbox warm pool
       run: "cat > \"$RUNNER_TEMP/go-dev-sandbox.yaml\" <<EOF\napiVersion: extensions.agents.x-k8s.io/v1beta1\n\
         kind: SandboxTemplate\nmetadata:\n  name: go-dev\n  namespace: default\nspec:\n\
