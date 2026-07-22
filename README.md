@@ -125,6 +125,14 @@ AI_FACTORY_SOURCE_URL when the target project consumes ai-factory from a
 separate GitLab mirror or repository. See docs/guide.md for protected
 variables, runner tags, webhook routing, and the required Docker privileges.
 
+## Quick Start
+
+You can run the project's Go tests locally with a single command:
+
+    go test ./...
+
+This runs the full Go test suite across all packages in the repository. Make sure you have a recent Go toolchain installed before running it.
+
 ## Development
 
 Run the Go test suite:
