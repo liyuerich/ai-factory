@@ -1,0 +1,158 @@
+# Copyright 2026 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+name: Run ai-factory on public repository issue
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_repository:
+        description: 'Target public repository in owner/repo format (e.g., kubernetes/kubernetes)'
+        required: true
+        type: string
+      issue_number:
+        description: 'Issue number in the target repository'
+        required: true
+        type: number
+      base_ref:
+        description: 'Git ref to checkout in the target repository'
+        required: false
+        default: main
+        type: string
+      agent_command:
+        description: 'Agent command to run inside the sandbox'
+        required: false
+        default: ai-factory-agent openai-compatible
+        type: string
+      validation_command:
+        description: 'Validation command to run after the agent finishes'
+        required: false
+        default: go test ./...
+        type: string
+
+concurrency:
+  group: run-on-public-repo-${{ inputs.target_repository }}-${{ inputs.issue_number }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      should_run: ${{ steps.check.outputs.should_run }}
+      require_label: ${{ steps.check.outputs.require_label }}
+    steps:
+    - name: Check target issue labels
+      id: check
+      env:
+        GH_TOKEN: ${{ secrets.PAT_TOKEN || github.token }}
+        TARGET_REPOSITORY: ${{ inputs.target_repository }}
+        ISSUE_NUMBER: ${{ inputs.issue_number }}
+      run: |
+        gh api "repos/${TARGET_REPOSITORY}/issues/${ISSUE_NUMBER}" \
+          --jq '{title: .title, labels: [.labels[].name]}' > "$RUNNER_TEMP/issue.json"
+        cat "$RUNNER_TEMP/issue.json"
+
+        labels="$(jq -r '.labels[]?' "$RUNNER_TEMP/issue.json")"
+        has_ai=false
+        has_run=false
+        has_smoke=false
+        for label in ${labels}; do
+          case "${label}" in
+            ai-factory) has_ai=true ;;
+            ai-factory-run) has_run=true ;;
+            ai-factory-smoke) has_smoke=true ;;
+          esac
+        done
+
+        if [[ "${has_ai}" != "true" ]]; then
+          echo "should_run=false" >> "$GITHUB_OUTPUT"
+          echo "require_label=" >> "$GITHUB_OUTPUT"
+          echo "Skipping: issue is missing the ai-factory label."
+          exit 0
+        fi
+
+        if [[ "${has_run}" != "true" && "${has_smoke}" != "true" ]]; then
+          echo "should_run=false" >> "$GITHUB_OUTPUT"
+          echo "require_label=" >> "$GITHUB_OUTPUT"
+          echo "Skipping: issue is missing the ai-factory-run or ai-factory-smoke label."
+          exit 0
+        fi
+
+        if [[ "${has_run}" == "true" ]]; then
+          require_label="ai-factory-run"
+        else
+          require_label="ai-factory-smoke"
+        fi
+        echo "should_run=true" >> "$GITHUB_OUTPUT"
+        echo "require_label=${require_label}" >> "$GITHUB_OUTPUT"
+        echo "Labels OK; will run with required label: ${require_label}"
+
+  run:
+    needs: validate
+    if: needs.validate.outputs.should_run == 'true'
+    uses: ./.github/workflows/ai-factory-issue-reusable.yaml
+    with:
+      repository: ${{ inputs.target_repository }}
+      issue_number: ${{ inputs.issue_number }}
+      base_ref: ${{ inputs.base_ref }}
+      agent_command: ${{ inputs.agent_command }}
+      validation_command: ${{ inputs.validation_command }}
+      require_label: ${{ needs.validate.outputs.require_label }}
+    secrets:
+      AI_FACTORY_OPENAI_API_KEY: ${{ secrets.AI_FACTORY_OPENAI_API_KEY }}
+      AI_FACTORY_GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
+
+  report:
+    needs:
+    - validate
+    - run
+    if: always() && needs.validate.outputs.should_run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+    - name: Post summary comment to target issue
+      env:
+        GH_TOKEN: ${{ secrets.PAT_TOKEN }}
+        TARGET_REPOSITORY: ${{ inputs.target_repository }}
+        ISSUE_NUMBER: ${{ inputs.issue_number }}
+        AGENT_COMMAND: ${{ inputs.agent_command }}
+        VALIDATION_COMMAND: ${{ inputs.validation_command }}
+        RUN_RESULT: ${{ needs.run.result }}
+      run: |
+        if [[ "${RUN_RESULT}" == "success" ]]; then
+          status="success"
+        else
+          status="failure"
+        fi
+        run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+
+        jq -n \
+          --arg repo "${TARGET_REPOSITORY}" \
+          --arg num "${ISSUE_NUMBER}" \
+          --arg status "${status}" \
+          --arg agent "${AGENT_COMMAND}" \
+          --arg validation "${VALIDATION_COMMAND}" \
+          --arg run_url "${run_url}" \
+          '{body: "ai-factory run result for \($repo)#\($num)\n\n- Status: \($status)\n- Agent command: `\($agent)`\n- Validation command: `\($validation)`\n- Workflow run logs: \($run_url)"}' \
+          > "$RUNNER_TEMP/comment.json"
+
+        echo "Posting comment to repos/${TARGET_REPOSITORY}/issues/${ISSUE_NUMBER}/comments"
+        gh api "repos/${TARGET_REPOSITORY}/issues/${ISSUE_NUMBER}/comments" \
+          --input "$RUNNER_TEMP/comment.json"

@@ -189,6 +189,50 @@ For local or CI debugging, the workflow can be started manually from the
 Kind Run Once workflow. It exercises the same temporary kind and
 agent-sandbox path without creating a PR.
 
+### 3.6 Run on an external public repository
+
+A workflow dispatch workflow in `.github/workflows/run-on-public-repo.yaml`
+lets you run ai-factory against an issue in any public GitHub repository.
+The workflow reads the issue through the GitHub API, validates the required
+labels, reuses the same kind + agent-sandbox path from
+`.github/workflows/ai-factory-issue-reusable.yaml`, and posts a summary comment
+back to the target issue.
+
+Trigger it from the **Actions** tab of the ai-factory repository:
+
+    Run workflow
+
+Parameters:
+
+- `target_repository` (required) — target repository as `owner/repo`.
+- `issue_number` (required) — target issue number.
+- `base_ref` (optional, default `main`) — branch or ref to checkout.
+- `agent_command` (optional, default `ai-factory-agent openai-compatible`).
+- `validation_command` (optional, default `go test ./...`).
+
+The target issue must already have both the `ai-factory` label and either the
+`ai-factory-run` or `ai-factory-smoke` label. If the labels are missing, the
+workflow skips execution and logs the reason.
+
+#### PAT configuration
+
+The default `GITHUB_TOKEN` cannot write comments or create pull requests in a
+repository outside the workflow's own project. Configure a personal access token
+with the `repo` scope (or `public_repo` for public repositories only) and store
+it as a repository secret named `PAT_TOKEN` in the ai-factory repository:
+
+    Settings -> Secrets and variables -> Actions -> New repository secret
+    PAT_TOKEN=<token with repo scope>
+
+Also configure the model provider secret used by the reusable workflow:
+
+    AI_FACTORY_OPENAI_API_KEY=<masked provider key>
+
+The workflow passes `PAT_TOKEN` to the reusable workflow as
+`AI_FACTORY_GITHUB_TOKEN`, so issue comments and any generated pull request are
+written to the target repository using that token.
+
+
 ## 4. GitLab Runner + kind
 
 ### 4.1 Make ai-factory available to the project

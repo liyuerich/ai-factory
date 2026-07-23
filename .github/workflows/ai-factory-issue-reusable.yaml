@@ -24,6 +24,10 @@ on:
         required: false
         default: go test ./...
         type: string
+      require_label:
+        required: false
+        default: ai-factory-run
+        type: string
     secrets:
       AI_FACTORY_OPENAI_API_KEY:
         required: false
@@ -45,7 +49,7 @@ jobs:
       ISSUE_NUMBER: ${{ inputs.issue_number }}
       AGENT_COMMAND: ${{ inputs.agent_command }}
       VALIDATION_COMMAND: ${{ inputs.validation_command }}
-      GH_TOKEN: ${{ github.token }}
+      GH_TOKEN: ${{ secrets.AI_FACTORY_GITHUB_TOKEN || github.token }}
       GITHUB_TOKEN: ${{ secrets.AI_FACTORY_GITHUB_TOKEN || github.token }}
       AI_FACTORY_GITHUB_TOKEN: ${{ secrets.AI_FACTORY_GITHUB_TOKEN || github.token
         }}
@@ -139,7 +143,7 @@ jobs:
         \n\ncd factory\ngo run ./factory/cmd/factory task webhook serve \\\n  --addr\
         \ 127.0.0.1:8080 \\\n  --apply \\\n  --repository \"$FACTORY_REPOSITORY\"\
         \ \\\n  --trigger-action opened \\\n  --trigger-action reopened \\\n  --trigger-action\
-        \ labeled \\\n  --require-label ai-factory-run \\\n  --sandbox-template go-dev\
+        \ labeled \\\n  --require-label ${{ inputs.require_label }} \\\n  --sandbox-template go-dev\
         \ \\\n  --agent-command \"$AGENT_COMMAND\" \\\n  --agent-env OPENAI_API_KEY\
         \ \\\n  --agent-env OPENAI_BASE_URL \\\n  --agent-env OPENAI_MODEL \\\n  --agent-env\
         \ OPENAI_TEMPERATURE \\\n  --agent-env OPENAI_MAX_TOKENS \\\n  --agent-env\
